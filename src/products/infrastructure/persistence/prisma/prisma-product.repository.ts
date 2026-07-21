@@ -34,7 +34,7 @@ export class PrismaProductRepository implements ProductRepository {
     });
 
     const items = rows.map(ProductMapper.toDomain);
-    const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
+    const nextCursor = rows.length === limit ? rows.at(-1)!.id : null;
     return { items, nextCursor };
   }
 }
