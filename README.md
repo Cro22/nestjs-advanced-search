@@ -13,6 +13,7 @@ A NestJS API for advanced product search built around Elasticsearch relevance, R
 7. [API reference](#api_reference)
 8. [Testing](#testing)
 9. [Design notes](#design_notes)
+10. [Known tradeoffs and next steps](#known_tradeoffs_and_next_steps)
 
 ## Features
 
@@ -75,7 +76,7 @@ Requirements: Docker and Docker Compose.
 docker compose up --build
 ```
 
-That command brings up Postgres, Elasticsearch, Redis and the API. On startup the API container syncs the database schema, seeds sample products (skipped if the table is already populated) and reindexes Elasticsearch from Postgres before it starts listening.
+That command brings up Postgres, Elasticsearch, Redis and the API. On startup the API container syncs the database schema, seeds sample products (skipped if the table is already populated) and reindexes Elasticsearch from Postgres before it starts listening. The reindex is idempotent: it runs only when the index is out of sync with Postgres, so restarting the container does not tear down a healthy index.
 
 Once the stack is healthy:
 
@@ -127,7 +128,7 @@ Useful scripts:
 | `npm run build`           | Compile to `dist/` (tsc plus tsc-alias)         |
 | `npm run db:push`         | Sync the Prisma schema to Postgres              |
 | `npm run db:seed`         | Seed sample products with faker                 |
-| `npm run search:reindex`  | Rebuild the Elasticsearch index from Postgres   |
+| `npm run search:reindex`  | Force a full rebuild of the Elasticsearch index |
 | `npm run bootstrap`       | Run db:push, db:seed and search:reindex in order|
 | `npm test`                | Run the unit test suite                         |
 | `npm run test:cov`        | Run tests with coverage                         |
@@ -275,3 +276,17 @@ npm run test:cov     # with coverage
 **Prisma 7.** Persistence uses Prisma 7 with the pg driver adapter. The client talks to Postgres through the `pg` driver instead of a bundled query engine, so there is no native engine binary to match against the container architecture. The connection URL lives in `prisma.config.ts` and is read from `DATABASE_URL`, shared by both the CLI (`db push`) and the application.
 
 **Error handling.** A global exception filter turns any error into a consistent JSON envelope, and validation runs through a global pipe that rejects unknown fields.
+
+## Known tradeoffs and next steps
+
+These are deliberate choices for the scope of this challenge, called out so the boundaries are explicit rather than accidental.
+
+* **Search cache freshness.** Search result pages are cached for a short window (default 30 seconds). A product created through the write path is indexed immediately and is findable on any query that is not already cached, but a query whose page is currently cached will not reflect the new product until the entry expires. A production system would invalidate or version the affected cache keys on writes. The short TTL keeps the staleness bounded and the code simple.
+
+* **Reindex scope.** The bootstrap reindex is idempotent (it rebuilds only when the index count differs from Postgres). It compares counts, not content, so it does not detect a mapping change on its own. Use `npm run search:reindex` (which forces a rebuild) after changing the index mapping. A production pipeline would move indexing off the request path into an outbox or a change data capture stream.
+
+* **Deep pagination.** Pagination uses `from` and `size`, which Elasticsearch bounds by `max_result_window` (10000 by default). That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`.
+
+* **Popularity signal.** Popularity is a static field seeded with the data and used for ranking and sorting. Wiring it to real interaction events (views, clicks, purchases) would make the popularity boost and the popularity sort reflect live behaviour.
+
+* **Single node infrastructure.** The Docker stack runs single node Elasticsearch with security disabled and no Redis or Postgres authentication hardening, which is appropriate for local evaluation but not for production.
