@@ -6,14 +6,14 @@ A NestJS API for advanced product search built around Elasticsearch relevance, R
 
 1. [Features](#features)
 2. [Architecture](#architecture)
-3. [Tech stack](#tech_stack)
-4. [Quick start with Docker](#quick_start_with_docker)
-5. [Local development](#local_development)
+3. [Tech stack](#tech-stack)
+4. [Quick start with Docker](#quick-start-with-docker)
+5. [Local development](#local-development)
 6. [Configuration](#configuration)
-7. [API reference](#api_reference)
+7. [API reference](#api-reference)
 8. [Testing](#testing)
-9. [Design notes](#design_notes)
-10. [Known tradeoffs and next steps](#known_tradeoffs_and_next_steps)
+9. [Design notes](#design-notes)
+10. [Known tradeoffs and next steps](#known-tradeoffs-and-next-steps)
 
 ## Features
 
@@ -30,6 +30,43 @@ A NestJS API for advanced product search built around Elasticsearch relevance, R
 ## Architecture
 
 The `products` module is split into three layers. Dependencies always point inward, toward the domain.
+
+```mermaid
+flowchart LR
+  Client([HTTP client]) --> Controller
+
+  subgraph Infrastructure
+    Controller[ProductsController]
+    ESAdapter[EsProductSearchAdapter]
+    RedisAdapter[RedisCacheAdapter]
+    PrismaRepo[PrismaProductRepository]
+  end
+
+  subgraph Application
+    UC["Use cases<br/>Search · Autocomplete · Create · Reindex"]
+  end
+
+  subgraph Domain
+    P1[[ProductSearchIndex]]
+    P2[[CachePort]]
+    P3[[ProductRepository]]
+  end
+
+  Controller --> UC
+  UC --> P1
+  UC --> P2
+  UC --> P3
+
+  ESAdapter -. implements .-> P1
+  RedisAdapter -. implements .-> P2
+  PrismaRepo -. implements .-> P3
+
+  ESAdapter --> ES[(Elasticsearch)]
+  RedisAdapter --> Redis[(Redis)]
+  PrismaRepo --> PG[(Postgres)]
+```
+
+The use cases depend on the ports (the boxed interfaces). The adapters implement those ports, so the arrows of implementation point inward toward the domain: that is the dependency inversion that keeps the core independent of Elasticsearch, Redis and Prisma. The folder layout mirrors it:
 
 ```
 src/products/
