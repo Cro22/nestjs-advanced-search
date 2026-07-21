@@ -7,12 +7,22 @@ import {
 
 export interface ReindexResult {
   indexed: number;
+  skipped: boolean;
+}
+
+export interface ReindexOptions {
+  /** Rebuild even when the index already matches Postgres (mapping changes). */
+  force?: boolean;
 }
 
 /**
  * Rebuilds the Elasticsearch projection from Postgres. Recreates the index to
  * pick up mapping changes, then streams products in batches using keyset
  * pagination so memory stays flat regardless of table size.
+ *
+ * The operation is idempotent: unless forced, it skips the rebuild when the
+ * index already holds the same number of documents as Postgres, so restarting
+ * the container does not tear down a healthy index.
  */
 @Injectable()
 export class ReindexProductsUseCase {
@@ -24,8 +34,17 @@ export class ReindexProductsUseCase {
     @Inject(PRODUCT_SEARCH_INDEX) private readonly searchIndex: ProductSearchIndex,
   ) {}
 
-  async execute(): Promise<ReindexResult> {
+  async execute(options: ReindexOptions = {}): Promise<ReindexResult> {
     const total = await this.repository.count();
+
+    if (!options.force) {
+      const indexedNow = await this.searchIndex.countDocuments();
+      if (total > 0 && indexedNow === total) {
+        this.logger.log(`Index already in sync (${total} products), skipping reindex.`);
+        return { indexed: total, skipped: true };
+      }
+    }
+
     this.logger.log(`Reindexing ${total} products...`);
 
     await this.searchIndex.recreateIndex();
@@ -44,6 +63,6 @@ export class ReindexProductsUseCase {
     } while (cursor !== null);
 
     this.logger.log(`Reindex complete. ${indexed} products in Elasticsearch.`);
-    return { indexed };
+    return { indexed, skipped: false };
   }
 }

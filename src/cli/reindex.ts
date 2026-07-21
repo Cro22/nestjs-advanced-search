@@ -12,9 +12,14 @@ async function run(): Promise<void> {
   const app = await NestFactory.createApplicationContext(AppModule, { logger });
 
   try {
+    const force = process.argv.includes('--force');
     const reindex = app.get(ReindexProductsUseCase);
-    const result = await reindex.execute();
-    logger.log(`Reindex finished. ${result.indexed} products indexed.`);
+    const result = await reindex.execute({ force });
+    if (result.skipped) {
+      logger.log(`Reindex skipped. Index already in sync with ${result.indexed} products.`);
+    } else {
+      logger.log(`Reindex finished. ${result.indexed} products indexed.`);
+    }
   } catch (error) {
     logger.error('Reindex failed', error instanceof Error ? error.stack : String(error));
     process.exitCode = 1;

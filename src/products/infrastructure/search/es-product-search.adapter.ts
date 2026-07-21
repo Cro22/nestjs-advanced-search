@@ -49,6 +49,15 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
     this.logger.log(`Recreated index "${this.indexName}"`);
   }
 
+  async countDocuments(): Promise<number> {
+    const exists = await this.client.indices.exists({ index: this.indexName });
+    if (!exists) {
+      return 0;
+    }
+    const response = await this.client.count({ index: this.indexName });
+    return response.count ?? 0;
+  }
+
   async index(product: Product): Promise<void> {
     await this.client.index({
       index: this.indexName,

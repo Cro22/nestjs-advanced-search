@@ -13,6 +13,9 @@ export interface ProductSearchIndex {
   /** Drop and recreate the index. Used before a full reindex. */
   recreateIndex(): Promise<void>;
 
+  /** Number of documents currently in the index (0 if it does not exist). */
+  countDocuments(): Promise<number>;
+
   index(product: Product): Promise<void>;
 
   bulkIndex(products: Product[]): Promise<void>;

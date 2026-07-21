@@ -7,7 +7,7 @@ npx prisma db push
 echo "Seeding products (skipped if already populated)..."
 node dist/prisma/seed.js
 
-echo "Reindexing Elasticsearch from Postgres..."
+echo "Ensuring Elasticsearch is in sync with Postgres (reindex only if needed)..."
 node dist/src/cli/reindex.js
 
 echo "Starting API..."

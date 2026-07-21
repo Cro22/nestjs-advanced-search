@@ -18,7 +18,7 @@
     "prisma:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
-    "search:reindex": "ts-node -r tsconfig-paths/register src/cli/reindex.ts",
+    "search:reindex": "ts-node -r tsconfig-paths/register src/cli/reindex.ts --force",
     "bootstrap": "npm run db:push && npm run db:seed && npm run search:reindex"
   },
   "dependencies": {
