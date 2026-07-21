@@ -19,4 +19,14 @@ module.exports = {
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'warn',
   },
+  overrides: [
+    {
+      // Tests assert against loosely typed Elasticsearch bodies, where casting
+      // to `any` is clearer than modelling every internal query shape.
+      files: ['*.spec.ts'],
+      rules: {
+        '@typescript-eslint/no-explicit-any': 'off',
+      },
+    },
+  ],
 };

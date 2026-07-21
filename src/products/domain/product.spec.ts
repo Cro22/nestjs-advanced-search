@@ -32,7 +32,10 @@ describe('Product.create', () => {
 
   it('defaults subcategories and popularity when missing', () => {
     const product = Product.create(
-      props({ subcategories: undefined as unknown as string[], popularity: undefined as unknown as number }),
+      props({
+        subcategories: undefined as unknown as string[],
+        popularity: undefined as unknown as number,
+      }),
     );
     expect(product.subcategories).toEqual([]);
     expect(product.popularity).toBe(0);

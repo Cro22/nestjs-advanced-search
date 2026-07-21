@@ -47,7 +47,10 @@ describe('EsQueryBuilder.buildSearchBody', () => {
     expect((relevance.query as any).function_score).toBeDefined();
 
     const byDate = EsQueryBuilder.buildSearchBody(
-      criteria({ text: 'phone', sort: { field: SortField.CREATED_AT, direction: SortDirection.DESC } }),
+      criteria({
+        text: 'phone',
+        sort: { field: SortField.CREATED_AT, direction: SortDirection.DESC },
+      }),
     );
     // No score shaping when an explicit field drives the ranking.
     expect((byDate.query as any).function_score).toBeUndefined();

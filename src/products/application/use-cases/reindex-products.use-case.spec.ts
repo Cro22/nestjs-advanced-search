@@ -57,8 +57,10 @@ describe('ReindexProductsUseCase', () => {
   it('reindexes when the index is out of sync', async () => {
     repository.count.mockResolvedValue(2);
     searchIndex.countDocuments.mockResolvedValue(0);
-    repository.findBatch
-      .mockResolvedValueOnce({ items: [makeProduct('1'), makeProduct('2')], nextCursor: null });
+    repository.findBatch.mockResolvedValueOnce({
+      items: [makeProduct('1'), makeProduct('2')],
+      nextCursor: null,
+    });
 
     const result = await useCase.execute();
 
