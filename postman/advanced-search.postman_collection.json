@@ -1,0 +1,170 @@
+{
+  "info": {
+    "name": "Advanced Product Search API",
+    "description": "Pre configured requests for the NestJS advanced search API. Set the baseUrl collection variable to point at your environment. It defaults to the local Docker stack at http://localhost:3000/api.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000/api",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Liveness probe that also reports the status of Postgres, Elasticsearch and Redis."
+      }
+    },
+    {
+      "name": "Search :: free text",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?q=laptop",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "q", "value": "laptop" }
+          ]
+        },
+        "description": "Full text search ranked by relevance. Name matches weigh highest, followed by category and subcategories."
+      }
+    },
+    {
+      "name": "Search :: typo tolerance",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?q=labtop",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "q", "value": "labtop" }
+          ]
+        },
+        "description": "Fuzzy matching still returns laptops for the misspelling labtop, and the suggestions array proposes the corrected term."
+      }
+    },
+    {
+      "name": "Search :: filters combined",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?categories=Electronics&subcategories=Laptops&locations=Madrid&minPrice=100&maxPrice=1500",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "categories", "value": "Electronics" },
+            { "key": "subcategories", "value": "Laptops" },
+            { "key": "locations", "value": "Madrid" },
+            { "key": "minPrice", "value": "100" },
+            { "key": "maxPrice", "value": "1500" }
+          ]
+        },
+        "description": "Combined faceting. Each returned facet keeps its sibling values so the client can refine further. Filters accept comma separated values or repeated keys."
+      }
+    },
+    {
+      "name": "Search :: multi value filter",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?categories=Electronics,Books&locations=Madrid,Barcelona",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "categories", "value": "Electronics,Books" },
+            { "key": "locations", "value": "Madrid,Barcelona" }
+          ]
+        },
+        "description": "A single filter can hold several values. Here products from Electronics or Books, located in Madrid or Barcelona."
+      }
+    },
+    {
+      "name": "Search :: sort by popularity",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?sort=popularity&order=desc&page=1&pageSize=10",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "sort", "value": "popularity" },
+            { "key": "order", "value": "desc" },
+            { "key": "page", "value": "1" },
+            { "key": "pageSize", "value": "10" }
+          ]
+        },
+        "description": "Sort options are relevance, popularity and created_at. Pagination is one based and page size is capped by SEARCH_MAX_PAGE_SIZE."
+      }
+    },
+    {
+      "name": "Search :: sort by newest",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?sort=created_at&order=desc",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "sort", "value": "created_at" },
+            { "key": "order", "value": "desc" }
+          ]
+        },
+        "description": "Newest products first."
+      }
+    },
+    {
+      "name": "Autocomplete",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/autocomplete?q=lap&limit=5",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "autocomplete"],
+          "query": [
+            { "key": "q", "value": "lap" },
+            { "key": "limit", "value": "5" }
+          ]
+        },
+        "description": "Prefix suggestions served from Elasticsearch and cached in Redis. Results are collapsed on the exact name so duplicates appear once."
+      }
+    },
+    {
+      "name": "Create product",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Aurora Laptop Pro\",\n  \"description\": \"A lightweight laptop for everyday use\",\n  \"category\": \"Electronics\",\n  \"subcategories\": [\"Laptops\"],\n  \"location\": \"Madrid\",\n  \"price\": 1299.99,\n  \"popularity\": 120\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/products",
+          "host": ["{{baseUrl}}"],
+          "path": ["products"]
+        },
+        "description": "Persists the product in Postgres and projects it into Elasticsearch in the same use case. The new product is immediately searchable."
+      }
+    }
+  ]
+}
