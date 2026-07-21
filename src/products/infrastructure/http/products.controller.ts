@@ -1,9 +1,19 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Query,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
 import { CreateProductUseCase } from '@/products/application/use-cases/create-product.use-case';
+import { SearchUnavailableError } from '@/products/domain/search/search.errors';
 import { SearchProductsQueryDto } from '@/products/infrastructure/http/dto/search-products.query.dto';
 import { AutocompleteQueryDto } from '@/products/infrastructure/http/dto/autocomplete.query.dto';
 import { CreateProductDto } from '@/products/infrastructure/http/dto/create-product.dto';
@@ -37,8 +47,12 @@ export class ProductsController {
   })
   async search(@Query() query: SearchProductsQueryDto) {
     const criteria = toSearchCriteria(query, this.maxPageSize);
-    const result = await this.searchProducts.execute(criteria);
-    return toSearchResponse(result);
+    try {
+      const result = await this.searchProducts.execute(criteria);
+      return toSearchResponse(result);
+    } catch (error) {
+      this.rethrow(error);
+    }
   }
 
   @Get('autocomplete')
@@ -49,8 +63,12 @@ export class ProductsController {
   })
   async autocompleteSuggestions(@Query() query: AutocompleteQueryDto) {
     const limit = Math.min(query.limit ?? this.autocompleteMax, this.autocompleteMax);
-    const suggestions = await this.autocomplete.execute({ prefix: query.q, limit });
-    return { suggestions };
+    try {
+      const suggestions = await this.autocomplete.execute({ prefix: query.q, limit });
+      return { suggestions };
+    } catch (error) {
+      this.rethrow(error);
+    }
   }
 
   @Post()
@@ -70,5 +88,16 @@ export class ProductsController {
       popularity: dto.popularity,
     });
     return toProductResponseFromDomain(product);
+  }
+
+  /**
+   * Translate domain errors into their HTTP counterparts. A search backend
+   * outage becomes a clean 503 instead of leaking the raw Elasticsearch error.
+   */
+  private rethrow(error: unknown): never {
+    if (error instanceof SearchUnavailableError) {
+      throw new ServiceUnavailableException(error.message);
+    }
+    throw error;
   }
 }
