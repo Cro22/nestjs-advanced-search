@@ -27,6 +27,9 @@ A NestJS API for advanced product search built around Elasticsearch relevance, R
 * Highlighting of the matched terms in name and description.
 * Pagination and sorting by relevance, popularity, creation date or distance.
 * Typo tolerance through fuzzy matching, so labtop still finds laptops.
+* Full product lifecycle: create, update, delete and a view event that feeds a live popularity signal.
+* Zero downtime reindexing: rebuilds stream into a staging index and an atomic alias swap makes them visible.
+* Transactional outbox: every write records an entry that a background processor replays, so the search projection converges even through an Elasticsearch outage.
 * Structured JSON logging with request correlation ids, rate limiting, graceful shutdown and readiness aware health checks.
 * Environment driven configuration validated at startup and global error handling with precise status codes.
 * Unit tests plus an end to end suite that runs the real stack through Testcontainers, wired into CI.
@@ -199,6 +202,7 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `THROTTLE_LIMIT`               | `120`                            | Requests allowed per window and client       |
 | `THROTTLE_AUTOCOMPLETE_TTL_MS` | `10000`                          | Autocomplete rate limit window               |
 | `THROTTLE_AUTOCOMPLETE_LIMIT`  | `30`                             | Autocomplete requests per window and client  |
+| `OUTBOX_POLL_MS`               | `5000`                           | Interval of the outbox processor             |
 | `DATABASE_URL`                 | see `.env.example`               | Postgres connection string                   |
 | `ELASTICSEARCH_NODE`           | `http://localhost:9200`          | Elasticsearch endpoint                       |
 | `ELASTICSEARCH_PRODUCT_INDEX`  | `products`                       | Index name                                   |
@@ -320,6 +324,26 @@ curl -X POST "http://localhost:3000/api/products" \
   }'
 ```
 
+### PUT /products/:id
+
+Full replacement of a product. The identity and creation date are kept, and so is the accumulated popularity unless the body provides one. The change is searchable on the next request. Returns `404` for an unknown id.
+
+### DELETE /products/:id
+
+Removes the product from Postgres and from the search index. Returns `204` on success and `404` for an unknown id.
+
+### POST /products/:id/view
+
+Records a view: atomically increments the popularity in Postgres and reprojects the document, so relevance boosting and popularity sorting reflect real interactions. Returns the new popularity.
+
+```bash
+curl -X POST "http://localhost:3000/api/products/<id>/view"
+```
+
+```json
+{ "id": "…", "popularity": 341 }
+```
+
 ### GET /health
 
 Readiness check. Pings Postgres, Elasticsearch and Redis through terminus and returns `503` with a per dependency breakdown when any of them is down, so an orchestrator stops routing traffic to a degraded instance.
@@ -361,7 +385,11 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 **Suggestions that always work.** The phrase suggester runs with `confidence` 1.0, so a reasonable query is not corrected into noise, and a `collate` query checks every candidate against the index so a suggestion the user clicks always has results.
 
-**Versioned index migration.** The physical index name embeds a schema version (`products_v2`). Bumping the version makes the boot reindex see an empty index and rebuild with the new mapping, with stale generations cleaned up afterwards. Mapping migrations therefore need no entrypoint changes and no manual steps.
+**Zero downtime reindexing.** Reads go through a stable alias while every rebuild streams into a fresh physical index named `{alias}_v{schema}_{timestamp}`. When the rebuild finishes, one atomic alias action makes the new generation visible and the old physicals are cleaned up; a failed rebuild is simply discarded, leaving the live index untouched. The schema version embedded in the physical name lets the boot reindex detect a mapping change and rebuild automatically, with no entrypoint changes and no manual steps.
+
+**Transactional outbox.** Every product mutation writes an outbox entry in the same Postgres transaction. The request path still indexes synchronously (so writes are searchable on the next request), and a background processor replays pending entries against the index, which turns an Elasticsearch outage at write time into a short delay instead of silent drift. Replaying an already projected write is an idempotent upsert.
+
+**Live popularity.** `POST /products/:id/view` atomically increments the popularity that the `function_score` blends into relevance and that `sort=popularity` ranks by. View events deliberately do not flush the search cache: a ranking nudge does not justify invalidating every cached page, and the short TTL bounds the staleness.
 
 **Caching.** Search pages are cached in Redis under `search:v{schema}:g{generation}:{sha1(criteria)}`. Hashing keeps keys short and stable regardless of filter order, the schema version fences off stale shapes after a deploy, and the generation counter is bumped by every write, which instantly invalidates all cached pages without scanning Redis. Old entries simply expire through their TTL. Autocomplete uses the same scheme. Cached dates are rehydrated into real Date objects on read. Every cache operation degrades gracefully, so a Redis outage slows the API down instead of taking it down.
 
@@ -379,14 +407,14 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 These are deliberate choices for the scope of this challenge, called out so the boundaries are explicit rather than accidental.
 
-* **Write path consistency.** The write use case saves to Postgres and then indexes into Elasticsearch. An indexing failure is logged and repaired by the next reindex rather than rolled back. A production pipeline would move indexing off the request path into an outbox or a change data capture stream, and would drop the per request `refresh: wait_for` in favour of eventual consistency.
+* **Write path consistency.** Writes hit Postgres first (with a transactional outbox entry) and then index synchronously for immediate searchability, with the outbox processor as the convergence guarantee. The remaining tradeoff is the per request `refresh: wait_for`, which trades write latency for read your writes semantics; a high throughput system would drop it and accept eventual consistency.
 
-* **Reindex scope.** The bootstrap reindex is idempotent (it rebuilds only when the index count differs from Postgres) and mapping changes are handled by the versioned index name, so drift in document content between equal counts is the only case that still needs a manual `npm run search:reindex`.
+* **Reindex scope.** The bootstrap reindex is idempotent (it rebuilds only when the index count differs from Postgres or the schema version changed), rebuilds are invisible thanks to the alias swap, and drift in document content between equal counts is the only case that still needs a manual `npm run search:reindex`. A write racing a reindex that runs in a different process can land only in the outgoing index generation; the outbox processor reprojects it into the new one within one poll interval.
 
 * **Deep pagination.** Pagination uses `from` and `size` and the API rejects requests beyond the first 10000 results with a clear 400 instead of failing inside the engine. That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`, which was deliberately left out.
 
 * **Rate limit storage.** The throttler keeps its counters in memory, so limits are per instance. Running several replicas behind a balancer would need the Redis storage backend for shared budgets.
 
-* **Popularity signal.** Popularity is a static field seeded with the data and used for ranking and sorting. Wiring it to real interaction events (views, clicks, purchases) would make the popularity boost and the popularity sort reflect live behaviour.
+* **Popularity signal.** Views feed popularity live through the view endpoint. Richer signals (clicks, purchases, decay over time) and batched increments would be the next steps for a production ranking pipeline.
 
 * **Single node infrastructure.** The Docker stack runs single node Elasticsearch with security disabled and no Redis or Postgres authentication hardening, which is appropriate for local evaluation but not for production.
