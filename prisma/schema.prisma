@@ -17,6 +17,10 @@ model Product {
   category      String
   subcategories String[]
   location      String
+  // Nullable so "prisma db push" upgrades an already populated volume in
+  // place; the seed backfills coordinates for rows that predate geo search.
+  latitude      Float?
+  longitude     Float?
   price         Decimal  @db.Decimal(12, 2)
   popularity    Int      @default(0)
   createdAt     DateTime @default(now()) @map("created_at")

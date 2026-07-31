@@ -14,6 +14,10 @@ export class ProductMapper {
       category: row.category,
       subcategories: row.subcategories,
       location: row.location,
+      coordinates:
+        row.latitude !== null && row.longitude !== null
+          ? { lat: row.latitude, lon: row.longitude }
+          : undefined,
       price: Number(row.price),
       popularity: row.popularity,
       createdAt: row.createdAt,
@@ -28,6 +32,8 @@ export class ProductMapper {
       category: product.category,
       subcategories: product.subcategories,
       location: product.location,
+      latitude: product.coordinates?.lat ?? null,
+      longitude: product.coordinates?.lon ?? null,
       price: product.price,
       popularity: product.popularity,
       createdAt: product.createdAt,
