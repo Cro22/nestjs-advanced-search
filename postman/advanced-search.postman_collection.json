@@ -13,7 +13,7 @@
   ],
   "item": [
     {
-      "name": "Health",
+      "name": "Health :: readiness",
       "request": {
         "method": "GET",
         "header": [],
@@ -22,7 +22,20 @@
           "host": ["{{baseUrl}}"],
           "path": ["health"]
         },
-        "description": "Liveness probe that also reports the status of Postgres, Elasticsearch and Redis."
+        "description": "Readiness probe. Pings Postgres, Elasticsearch and Redis and returns 503 with a per dependency breakdown when any of them is down."
+      }
+    },
+    {
+      "name": "Health :: liveness",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health/liveness",
+          "host": ["{{baseUrl}}"],
+          "path": ["health", "liveness"]
+        },
+        "description": "Liveness probe. Only proves the process responds, with no dependency checks."
       }
     },
     {
@@ -114,6 +127,42 @@
       }
     },
     {
+      "name": "Search :: geo radius",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?lat=40.4168&lon=-3.7038&radiusKm=25",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "lat", "value": "40.4168" },
+            { "key": "lon", "value": "-3.7038" },
+            { "key": "radiusKm", "value": "25" }
+          ]
+        },
+        "description": "Only products within 25 km of central Madrid. The facets honour the radius too."
+      }
+    },
+    {
+      "name": "Search :: sort by distance",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?lat=40.4168&lon=-3.7038&sort=distance",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "lat", "value": "40.4168" },
+            { "key": "lon", "value": "-3.7038" },
+            { "key": "sort", "value": "distance" }
+          ]
+        },
+        "description": "Nearest products first. Each hit carries distanceKm measured from the origin."
+      }
+    },
+    {
       "name": "Search :: sort by newest",
       "request": {
         "method": "GET",
@@ -156,7 +205,7 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Aurora Laptop Pro\",\n  \"description\": \"A lightweight laptop for everyday use\",\n  \"category\": \"Electronics\",\n  \"subcategories\": [\"Laptops\"],\n  \"location\": \"Madrid\",\n  \"price\": 1299.99,\n  \"popularity\": 120\n}"
+          "raw": "{\n  \"name\": \"Aurora Laptop Pro\",\n  \"description\": \"A lightweight laptop for everyday use\",\n  \"category\": \"Electronics\",\n  \"subcategories\": [\"Laptops\"],\n  \"location\": \"Madrid\",\n  \"latitude\": 40.4168,\n  \"longitude\": -3.7038,\n  \"price\": 1299.99,\n  \"popularity\": 120\n}"
         },
         "url": {
           "raw": "{{baseUrl}}/products",

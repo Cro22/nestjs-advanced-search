@@ -19,13 +19,17 @@ A NestJS API for advanced product search built around Elasticsearch relevance, R
 
 * Full text search over name, description, category, subcategories, location and price.
 * Relevance ranking. Name matches weigh highest, with a gentle popularity boost blended into the score.
-* Autocomplete served from Elasticsearch and cached in Redis for the highly repetitive keystroke traffic.
-* Query suggestions (did you mean) powered by a phrase suggester.
+* Geo search: filter by a radius around a coordinate and sort by distance, alongside the plain city filter.
+* Autocomplete served from Elasticsearch and cached in Redis, with typo tolerance so `laptp` still completes to laptops.
+* Query suggestions (did you mean) powered by a phrase suggester, collated against the index so every suggestion is guaranteed to return results.
 * Combined and individual faceting for categories, subcategories, location and price.
-* Filtering by category, subcategories, location and price range.
-* Pagination and sorting by relevance, popularity or creation date.
+* Filtering by category, subcategories, location, price range and geo radius.
+* Highlighting of the matched terms in name and description.
+* Pagination and sorting by relevance, popularity, creation date or distance.
 * Typo tolerance through fuzzy matching, so labtop still finds laptops.
-* Environment driven configuration validated at startup, global error handling and a dependency aware health check.
+* Structured JSON logging with request correlation ids, rate limiting, graceful shutdown and readiness aware health checks.
+* Environment driven configuration validated at startup and global error handling with precise status codes.
+* Unit tests plus an end to end suite that runs the real stack through Testcontainers, wired into CI.
 
 ## Architecture
 
@@ -103,7 +107,11 @@ Imports use the `@/` alias mapped to `src/` (for example `@/products/domain/prod
 | ORM                | Prisma                          |
 | Validation         | class validator, Joi for env    |
 | API docs           | Swagger (OpenAPI)               |
-| Tests              | Jest                            |
+| Logging            | pino via nestjs pino            |
+| Rate limiting      | NestJS throttler                |
+| Health checks      | NestJS terminus                 |
+| Tests              | Jest, Supertest, Testcontainers |
+| CI                 | GitHub Actions                  |
 
 ## Quick start with Docker
 
@@ -134,6 +142,10 @@ To stop and remove the stack together with its volumes:
 ```bash
 docker compose down -v
 ```
+
+### Upgrading an existing volume
+
+A plain `docker compose up --build` migrates an already populated stack in place: `db push` adds the new nullable coordinate columns, the seed backfills coordinates for existing rows, and the boot reindex rebuilds the versioned index (`products_v2`) with the new mapping. `docker compose down -v` remains the clean slate path.
 
 ## Local development
 
@@ -168,8 +180,10 @@ Useful scripts:
 | `npm run search:reindex`  | Force a full rebuild of the Elasticsearch index |
 | `npm run bootstrap`       | Run db:push, db:seed and search:reindex in order|
 | `npm test`                | Run the unit test suite                         |
+| `npm run test:e2e`        | Run the end to end suite (needs Docker)         |
 | `npm run test:cov`        | Run tests with coverage                         |
 | `npm run lint`            | Lint and autofix                                |
+| `npm run lint:check`      | Lint without fixing (used by CI)                |
 
 ## Configuration
 
@@ -180,6 +194,11 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `NODE_ENV`                     | `development`                    | Runtime environment                          |
 | `PORT`                         | `3000`                           | HTTP port                                    |
 | `API_PREFIX`                   | `api`                            | Global route prefix                          |
+| `LOG_LEVEL`                    | `info`                           | pino log level                               |
+| `THROTTLE_TTL_MS`              | `60000`                          | Rate limit window in milliseconds            |
+| `THROTTLE_LIMIT`               | `120`                            | Requests allowed per window and client       |
+| `THROTTLE_AUTOCOMPLETE_TTL_MS` | `10000`                          | Autocomplete rate limit window               |
+| `THROTTLE_AUTOCOMPLETE_LIMIT`  | `30`                             | Autocomplete requests per window and client  |
 | `DATABASE_URL`                 | see `.env.example`               | Postgres connection string                   |
 | `ELASTICSEARCH_NODE`           | `http://localhost:9200`          | Elasticsearch endpoint                       |
 | `ELASTICSEARCH_PRODUCT_INDEX`  | `products`                       | Index name                                   |
@@ -208,10 +227,19 @@ Query parameters:
 | `locations`     | string list       | Filter by location                                                |
 | `minPrice`      | number            | Lower price bound                                                 |
 | `maxPrice`      | number            | Upper price bound                                                 |
-| `sort`          | enum              | `relevance`, `popularity` or `created_at`. Defaults to relevance  |
-| `order`         | enum              | `asc` or `desc`. Defaults to desc                                 |
+| `lat`           | number            | Latitude of the search origin. Requires `lon`                     |
+| `lon`           | number            | Longitude of the search origin. Requires `lat`                    |
+| `radiusKm`      | number            | Only match products within this radius. Requires `lat` and `lon`  |
+| `sort`          | enum              | `relevance`, `popularity`, `created_at` or `distance`. Defaults to relevance. `distance` requires `lat` and `lon` |
+| `order`         | enum              | `asc` or `desc`. Defaults to desc, except `distance` which defaults to nearest first |
 | `page`          | integer           | One based page number. Defaults to 1                              |
 | `pageSize`      | integer           | Page size, capped by `SEARCH_MAX_PAGE_SIZE`. Defaults to 20       |
+
+Geo example:
+
+```bash
+curl "http://localhost:3000/api/products/search?lat=40.4168&lon=-3.7038&radiusKm=25&sort=distance"
+```
 
 Example:
 
@@ -231,10 +259,13 @@ Response shape:
       "category": "Electronics",
       "subcategories": ["Smartphones"],
       "location": "Madrid",
+      "coordinates": { "lat": 40.4321, "lon": -3.6852 },
       "price": 699.99,
       "popularity": 340,
       "createdAt": "2026-01-10T12:00:00.000Z",
-      "score": 12.4
+      "score": 12.4,
+      "highlights": { "name": "Aurora <em>Phone</em>" },
+      "distanceKm": 3.21
     }
   ],
   "meta": { "total": 128, "page": 1, "pageSize": 10, "totalPages": 13 },
@@ -248,9 +279,13 @@ Response shape:
 }
 ```
 
+`highlights` appears only for text queries when the engine produced fragments, and `distanceKm` only when sorting by distance.
+
+Error semantics: a malformed request (inconsistent geo parameters, pagination beyond the first 10000 results, a query the engine rejects) returns `400` with a message explaining the problem. A search backend outage returns `503`. Client mistakes are never reported as outages.
+
 ### GET /products/autocomplete
 
-Prefix suggestions for product names, served from Elasticsearch and cached in Redis.
+Prefix suggestions for product names, served from Elasticsearch and cached in Redis. Exact prefixes rank first and a fuzzy clause rescues typos, so `laptp` still suggests laptops. This route has a stricter rate limit because it fires on every keystroke.
 
 | Parameter | Type    | Description                                              |
 | --------- | ------- | ------------------------------------------------------- |
@@ -267,7 +302,7 @@ curl "http://localhost:3000/api/products/autocomplete?q=lap&limit=5"
 
 ### POST /products
 
-Creates a product in Postgres and projects it into Elasticsearch in the same use case, so it is immediately searchable.
+Creates a product in Postgres and projects it into Elasticsearch in the same use case, so it is immediately searchable. The write also bumps the cache generation, which instantly invalidates every cached search page. Coordinates are optional and must come as a pair.
 
 ```bash
 curl -X POST "http://localhost:3000/api/products" \
@@ -278,6 +313,8 @@ curl -X POST "http://localhost:3000/api/products" \
     "category": "Electronics",
     "subcategories": ["Laptops"],
     "location": "Madrid",
+    "latitude": 40.4168,
+    "longitude": -3.7038,
     "price": 1299.99,
     "popularity": 120
   }'
@@ -285,7 +322,11 @@ curl -X POST "http://localhost:3000/api/products" \
 
 ### GET /health
 
-Reports liveness and the status of Postgres, Elasticsearch and Redis.
+Readiness check. Pings Postgres, Elasticsearch and Redis through terminus and returns `503` with a per dependency breakdown when any of them is down, so an orchestrator stops routing traffic to a degraded instance.
+
+### GET /health/liveness
+
+Liveness check. Only proves the process responds, with no dependency checks, so a cache outage never causes a restart loop.
 
 ### Postman
 
@@ -293,12 +334,20 @@ A ready to use collection lives at `postman/advanced-search.postman_collection.j
 
 ## Testing
 
-Unit tests cover the pure logic where most of the behaviour lives: the Elasticsearch query builder (relevance shaping, combined faceting, filters, sorting and suggestions), the HTTP to domain criteria mapper, the caching behaviour of the search and autocomplete use cases, the Product aggregate invariants and the pagination helpers. They run fast and need no infrastructure.
+**Unit tests** cover the pure logic where most of the behaviour lives: the Elasticsearch query builder (relevance shaping, combined faceting, geo clauses, filters, sorting, highlighting and suggestions), the HTTP to domain criteria mapper (including the geo consistency rules and the deep pagination guard), the caching behaviour of the use cases, the adapter error mapping, the Product aggregate invariants, the health indicators and the pagination helpers. They run fast and need no infrastructure.
 
 ```bash
 npm test
 npm run test:cov     # with coverage
 ```
+
+**End to end tests** boot the real application (with the production middleware pipeline) against ephemeral Postgres, Elasticsearch and Redis containers managed by Testcontainers, and drive it over HTTP with Supertest. They verify relevance ordering, faceting, highlighting, typo tolerance, collated suggestions, geo radius filtering, distance sorting, cache invalidation on writes, validation errors, rate limiting and the readiness vs liveness split.
+
+```bash
+npm run test:e2e
+```
+
+They need a running Docker daemon (Docker Desktop on Windows and macOS). The first run downloads the service images, so allow a few extra minutes.
 
 ## Design notes
 
@@ -306,7 +355,19 @@ npm run test:cov     # with coverage
 
 **Relevance.** The text query is a `multi_match` with field boosts (name highest, then category and subcategories, then description) and `AUTO` fuzziness for typo tolerance. When sorting by relevance a `function_score` adds a gentle popularity factor on top of the text score rather than letting popularity dominate. When sorting by an explicit field that score shaping is skipped.
 
-**Caching.** Full result pages are cached in Redis under a normalized key, so filter order does not create duplicate entries. Autocomplete has its own short lived cache because prefix traffic is extremely repetitive while a user types. Cached dates are rehydrated into real Date objects on read.
+**Geo search.** Products carry an optional `geo_point`. A radius query becomes a `geo_distance` filter that also constrains every facet, and distance sorting uses `_geo_distance` with the per hit distance surfaced as `distanceKm`. Coordinates are nullable in Postgres so the schema upgrade works in place, and documents without coordinates simply sort last.
+
+**Autocomplete typo tolerance.** The `search_as_you_type` query stays a `bool_prefix` `multi_match`, boosted so exact prefixes always win, with a separate fuzzy `match` clause as a rescue path. The clauses are separate because fuzziness inside a `bool_prefix` `multi_match` never applies to the final prefix term and behaves poorly on the shingle subfields.
+
+**Suggestions that always work.** The phrase suggester runs with `confidence` 1.0, so a reasonable query is not corrected into noise, and a `collate` query checks every candidate against the index so a suggestion the user clicks always has results.
+
+**Versioned index migration.** The physical index name embeds a schema version (`products_v2`). Bumping the version makes the boot reindex see an empty index and rebuild with the new mapping, with stale generations cleaned up afterwards. Mapping migrations therefore need no entrypoint changes and no manual steps.
+
+**Caching.** Search pages are cached in Redis under `search:v{schema}:g{generation}:{sha1(criteria)}`. Hashing keeps keys short and stable regardless of filter order, the schema version fences off stale shapes after a deploy, and the generation counter is bumped by every write, which instantly invalidates all cached pages without scanning Redis. Old entries simply expire through their TTL. Autocomplete uses the same scheme. Cached dates are rehydrated into real Date objects on read. Every cache operation degrades gracefully, so a Redis outage slows the API down instead of taking it down.
+
+**Errors with the right status.** The Elasticsearch adapter distinguishes a rejected request (a 400 class response, surfaced as `InvalidSearchQueryError` and mapped to HTTP 400) from connectivity failures and server errors (`SearchUnavailableError`, HTTP 503). The deep pagination guard rejects requests beyond the `max_result_window` up front with a clear message.
+
+**Observability and protection.** All logs are structured JSON through pino, each request carries a correlation id (honouring an inbound `x-request-id`), sensitive headers are redacted and health probes are excluded from access logs. A global throttler bounds request rates per client with a stricter budget for autocomplete, and shutdown hooks close Postgres and Redis connections cleanly on SIGTERM.
 
 **Data model.** Postgres holds the write model and is the single source of truth. Elasticsearch is a read projection. Keeping the two responsibilities separate lets each side use the tool it is good at, and the reindex command can always rebuild the index from Postgres.
 
@@ -318,11 +379,13 @@ npm run test:cov     # with coverage
 
 These are deliberate choices for the scope of this challenge, called out so the boundaries are explicit rather than accidental.
 
-* **Search cache freshness.** Search result pages are cached for a short window (default 30 seconds). A product created through the write path is indexed immediately and is findable on any query that is not already cached, but a query whose page is currently cached will not reflect the new product until the entry expires. A production system would invalidate or version the affected cache keys on writes. The short TTL keeps the staleness bounded and the code simple.
+* **Write path consistency.** The write use case saves to Postgres and then indexes into Elasticsearch. An indexing failure is logged and repaired by the next reindex rather than rolled back. A production pipeline would move indexing off the request path into an outbox or a change data capture stream, and would drop the per request `refresh: wait_for` in favour of eventual consistency.
 
-* **Reindex scope.** The bootstrap reindex is idempotent (it rebuilds only when the index count differs from Postgres). It compares counts, not content, so it does not detect a mapping change on its own. Use `npm run search:reindex` (which forces a rebuild) after changing the index mapping. A production pipeline would move indexing off the request path into an outbox or a change data capture stream.
+* **Reindex scope.** The bootstrap reindex is idempotent (it rebuilds only when the index count differs from Postgres) and mapping changes are handled by the versioned index name, so drift in document content between equal counts is the only case that still needs a manual `npm run search:reindex`.
 
-* **Deep pagination.** Pagination uses `from` and `size`, which Elasticsearch bounds by `max_result_window` (10000 by default). That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`.
+* **Deep pagination.** Pagination uses `from` and `size` and the API rejects requests beyond the first 10000 results with a clear 400 instead of failing inside the engine. That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`, which was deliberately left out.
+
+* **Rate limit storage.** The throttler keeps its counters in memory, so limits are per instance. Running several replicas behind a balancer would need the Redis storage backend for shared budgets.
 
 * **Popularity signal.** Popularity is a static field seeded with the data and used for ranking and sorting. Wiring it to real interaction events (views, clicks, purchases) would make the popularity boost and the popularity sort reflect live behaviour.
 
