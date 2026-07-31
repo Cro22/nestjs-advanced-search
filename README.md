@@ -395,7 +395,7 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 **Errors with the right status.** The Elasticsearch adapter distinguishes a rejected request (a 400 class response, surfaced as `InvalidSearchQueryError` and mapped to HTTP 400) from connectivity failures and server errors (`SearchUnavailableError`, HTTP 503). The deep pagination guard rejects requests beyond the `max_result_window` up front with a clear message.
 
-**Observability and protection.** All logs are structured JSON through pino, each request carries a correlation id (honouring an inbound `x-request-id`), sensitive headers are redacted and health probes are excluded from access logs. A global throttler bounds request rates per client with a stricter budget for autocomplete, and shutdown hooks close Postgres and Redis connections cleanly on SIGTERM.
+**Observability and protection.** All logs are structured JSON through pino, each request carries a correlation id (honouring an inbound `x-request-id`), sensitive headers are redacted and health probes are excluded from access logs. A global throttler bounds request rates per client with a stricter budget for autocomplete; its counters live in Redis, so the limits hold across replicas, and a fail open wrapper lets requests through if Redis is unreachable instead of turning every call into an error. Shutdown hooks close Postgres and Redis connections cleanly on SIGTERM.
 
 **Data model.** Postgres holds the write model and is the single source of truth. Elasticsearch is a read projection. Keeping the two responsibilities separate lets each side use the tool it is good at, and the reindex command can always rebuild the index from Postgres.
 
@@ -413,7 +413,7 @@ These are deliberate choices for the scope of this challenge, called out so the 
 
 * **Deep pagination.** Pagination uses `from` and `size` and the API rejects requests beyond the first 10000 results with a clear 400 instead of failing inside the engine. That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`, which was deliberately left out.
 
-* **Rate limit storage.** The throttler keeps its counters in memory, so limits are per instance. Running several replicas behind a balancer would need the Redis storage backend for shared budgets.
+* **Rate limiting fails open.** Throttle counters are shared through Redis, and when Redis is unreachable the guard lets requests through rather than rejecting them all. That trades a brief window without protection for availability, which is the right default here; an API under active abuse would prefer to fail closed.
 
 * **Popularity signal.** Views feed popularity live through the view endpoint. Richer signals (clicks, purchases, decay over time) and batched increments would be the next steps for a production ranking pipeline.
 

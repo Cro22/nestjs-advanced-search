@@ -4,12 +4,16 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import Redis from 'ioredis';
 import { LoggerModule } from 'nestjs-pino';
 import configuration from '@/config/configuration';
 import { envValidationSchema } from '@/config/env.validation';
 import { ProductsModule } from '@/products/products.module';
 import { HealthModule } from '@/health/health.module';
 import { MetricsModule } from '@/shared/infrastructure/metrics/metrics.module';
+import { REDIS_CLIENT } from '@/products/infrastructure/cache/redis-cache.adapter';
+import { ResilientThrottlerStorage } from '@/shared/infrastructure/http/resilient-throttler.storage';
 
 @Module({
   imports: [
@@ -42,24 +46,24 @@ import { MetricsModule } from '@/shared/infrastructure/metrics/metrics.module';
       }),
     }),
     ThrottlerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
+      imports: [ProductsModule],
+      inject: [ConfigService, REDIS_CLIENT],
+      useFactory: (config: ConfigService, redis: Redis) => ({
         throttlers: [
           {
             ttl: config.get<number>('throttle.ttlMs', 60000),
             limit: config.get<number>('throttle.limit', 120),
           },
         ],
+        // Counters live in Redis so limits hold across replicas; the wrapper
+        // fails open when Redis is down instead of erroring every request.
+        storage: new ResilientThrottlerStorage(new ThrottlerStorageRedisService(redis)),
       }),
     }),
     MetricsModule,
     ProductsModule,
     HealthModule,
   ],
-  providers: [
-    // In memory storage: limits are per instance. Swapping in a Redis storage
-    // is the scale out path once multiple replicas run behind a balancer.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
-  ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}
