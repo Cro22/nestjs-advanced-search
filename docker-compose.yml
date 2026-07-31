@@ -16,7 +16,8 @@ services:
       retries: 10
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    # Kept in the same minor as the client library, with the server ahead.
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
     environment:
       discovery.type: single-node
       xpack.security.enabled: 'false'

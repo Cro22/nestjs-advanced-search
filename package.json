@@ -22,7 +22,7 @@
     "bootstrap": "npm run db:push && npm run db:seed && npm run search:reindex"
   },
   "dependencies": {
-    "@elastic/elasticsearch": "^8.14.0",
+    "@elastic/elasticsearch": "~8.14.0",
     "@faker-js/faker": "^8.4.1",
     "@nestjs/common": "^10.3.10",
     "@nestjs/config": "^3.2.3",

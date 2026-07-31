@@ -33,15 +33,25 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 # Generate the Prisma client against the production node_modules.
-COPY prisma.config.ts ./
-COPY prisma ./prisma
+COPY --chown=node:node prisma.config.ts ./
+COPY --chown=node:node prisma ./prisma
 RUN npx prisma generate
 
 # Compiled output from the build stage.
-COPY --from=builder /app/dist ./dist
+COPY --from=builder --chown=node:node /app/dist ./dist
 
-COPY docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --chown=node:node docker-entrypoint.sh ./docker-entrypoint.sh
 RUN chmod +x docker-entrypoint.sh
 
+# Drop root: the app only reads /app and talks to the network.
+USER node
+
 EXPOSE 3000
+
+# start-period covers the entrypoint bootstrap (db push, seed backfill and a
+# full reindex after a schema version bump). Adjust the URL if PORT or
+# API_PREFIX change.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD wget -qO- http://localhost:3000/api/health >/dev/null 2>&1 || exit 1
+
 ENTRYPOINT ["./docker-entrypoint.sh"]
