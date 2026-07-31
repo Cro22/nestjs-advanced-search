@@ -99,9 +99,7 @@ describe('toSearchCriteria', () => {
 
     it('rejects pages beyond the search window', () => {
       expect(() => map({ page: 501, pageSize: 20 })).toThrow(InvalidSearchQueryError);
-      expect(() => map({ page: 101, pageSize: 100 })).toThrow(
-        /limited to the first 10000 results/,
-      );
+      expect(() => map({ page: 101, pageSize: 100 })).toThrow(/limited to the first 10000 results/);
     });
   });
 });

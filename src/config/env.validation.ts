@@ -8,6 +8,14 @@ export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'test', 'production').default('development'),
   PORT: Joi.number().default(3000),
   API_PREFIX: Joi.string().default('api'),
+  LOG_LEVEL: Joi.string()
+    .valid('fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent')
+    .default('info'),
+
+  THROTTLE_TTL_MS: Joi.number().default(60000),
+  THROTTLE_LIMIT: Joi.number().default(120),
+  THROTTLE_AUTOCOMPLETE_TTL_MS: Joi.number().default(10000),
+  THROTTLE_AUTOCOMPLETE_LIMIT: Joi.number().default(30),
 
   DATABASE_URL: Joi.string().required(),
 

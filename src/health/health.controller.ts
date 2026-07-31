@@ -1,48 +1,44 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ConfigService } from '@nestjs/config';
-import { Inject } from '@nestjs/common';
-import { Client } from '@elastic/elasticsearch';
-import Redis from 'ioredis';
+import { HealthCheck, HealthCheckService, PrismaHealthIndicator } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
 import { PrismaService } from '@/products/infrastructure/persistence/prisma/prisma.service';
-import { ELASTICSEARCH_CLIENT } from '@/products/infrastructure/search/elasticsearch.client';
-import { REDIS_CLIENT } from '@/products/infrastructure/cache/redis-cache.adapter';
+import { ElasticsearchHealthIndicator } from '@/health/indicators/elasticsearch.health';
+import { RedisHealthIndicator } from '@/health/indicators/redis.health';
 
+/**
+ * Readiness vs liveness split. The root route pings every backing service and
+ * returns 503 when any is down, so an orchestrator stops routing traffic to a
+ * degraded instance. Liveness only proves the process responds, so a Redis
+ * outage never causes a restart loop. Both skip throttling: an orchestrator
+ * probing on schedule must never see a 429.
+ */
 @ApiTags('health')
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(
+    private readonly health: HealthCheckService,
+    private readonly prismaIndicator: PrismaHealthIndicator,
     private readonly prisma: PrismaService,
-    @Inject(ELASTICSEARCH_CLIENT) private readonly es: Client,
-    @Inject(REDIS_CLIENT) private readonly redis: Redis,
-    private readonly config: ConfigService,
+    private readonly elasticsearch: ElasticsearchHealthIndicator,
+    private readonly redis: RedisHealthIndicator,
   ) {}
 
   @Get()
-  @ApiOperation({ summary: 'Liveness and dependency check' })
-  async check() {
-    const [postgres, elasticsearch, redis] = await Promise.all([
-      this.safe(() => this.prisma.$queryRaw`SELECT 1`),
-      this.safe(() => this.es.ping()),
-      this.safe(() => this.redis.ping()),
+  @ApiOperation({ summary: 'Readiness check of every backing service' })
+  @HealthCheck()
+  check() {
+    return this.health.check([
+      () => this.prismaIndicator.pingCheck('postgres', this.prisma),
+      () => this.elasticsearch.isHealthy('elasticsearch'),
+      () => this.redis.isHealthy('redis'),
     ]);
-
-    const dependencies = { postgres, elasticsearch, redis };
-    const healthy = Object.values(dependencies).every((status) => status === 'up');
-
-    return {
-      status: healthy ? 'ok' : 'degraded',
-      env: this.config.get<string>('env'),
-      dependencies,
-    };
   }
 
-  private async safe(check: () => Promise<unknown>): Promise<'up' | 'down'> {
-    try {
-      await check();
-      return 'up';
-    } catch {
-      return 'down';
-    }
+  @Get('liveness')
+  @ApiOperation({ summary: 'Process liveness, no dependency checks' })
+  liveness() {
+    return { status: 'ok' };
   }
 }

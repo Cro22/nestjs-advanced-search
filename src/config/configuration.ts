@@ -2,6 +2,11 @@ export interface AppConfig {
   env: string;
   port: number;
   apiPrefix: string;
+  logLevel: string;
+  throttle: {
+    ttlMs: number;
+    limit: number;
+  };
   elasticsearch: {
     node: string;
     index: string;
@@ -21,6 +26,11 @@ export default (): AppConfig => ({
   env: process.env.NODE_ENV ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
   apiPrefix: process.env.API_PREFIX ?? 'api',
+  logLevel: process.env.LOG_LEVEL ?? 'info',
+  throttle: {
+    ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
+    limit: parseInt(process.env.THROTTLE_LIMIT ?? '120', 10),
+  },
   elasticsearch: {
     node: process.env.ELASTICSEARCH_NODE ?? 'http://localhost:9200',
     index: process.env.ELASTICSEARCH_PRODUCT_INDEX ?? 'products',

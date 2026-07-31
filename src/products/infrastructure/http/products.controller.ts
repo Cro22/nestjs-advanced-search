@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { AUTOCOMPLETE_THROTTLE } from '@/shared/infrastructure/http/throttle.constants';
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
 import { CreateProductUseCase } from '@/products/application/use-cases/create-product.use-case';
@@ -60,6 +62,8 @@ export class ProductsController {
   }
 
   @Get('autocomplete')
+  // Autocomplete fires on every keystroke, so it gets its own tighter budget.
+  @Throttle({ default: AUTOCOMPLETE_THROTTLE })
   @ApiOperation({
     summary: 'Autocomplete suggestions',
     description:

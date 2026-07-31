@@ -1,40 +1,26 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
-import helmet from 'helmet';
-import compression from 'compression';
+import { Logger } from 'nestjs-pino';
 import { AppModule } from '@/app.module';
-import { AllExceptionsFilter } from '@/shared/infrastructure/http/all-exceptions.filter';
+import { configureApp } from '@/app.setup';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: false });
-  const config = app.get(ConfigService);
-  const logger = new Logger('Bootstrap');
+  // Buffer until pino takes over so even bootstrap lines are structured.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const logger = app.get(Logger);
+  app.useLogger(logger);
 
+  const config = app.get(ConfigService);
   const apiPrefix = config.get<string>('apiPrefix', 'api');
   const port = config.get<number>('port', 3000);
 
-  app.setGlobalPrefix(apiPrefix);
-  app.use(helmet());
-  app.use(compression());
-  app.enableCors();
-
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-      transformOptions: { enableImplicitConversion: false },
-    }),
-  );
-
-  app.useGlobalFilters(new AllExceptionsFilter());
+  configureApp(app, config);
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Advanced Product Search API')
     .setDescription(
-      'Product search with Elasticsearch relevance, Redis backed autocomplete, faceting, filtering, pagination and sorting.',
+      'Product search with Elasticsearch relevance, Redis backed autocomplete, faceting, filtering, geo search, pagination and sorting.',
     )
     .setVersion('1.0')
     .build();
