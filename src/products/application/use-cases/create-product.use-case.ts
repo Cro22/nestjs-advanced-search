@@ -8,6 +8,7 @@ import {
 } from '@/products/domain/ports/product-search-index.repository';
 import { CACHE_PORT, CachePort } from '@/products/domain/ports/cache.port';
 import { GENERATION_KEY } from '@/products/application/cache-keys';
+import { GeoPoint } from '@/products/domain/geo';
 
 export interface CreateProductCommand {
   name: string;
@@ -15,6 +16,7 @@ export interface CreateProductCommand {
   category: string;
   subcategories: string[];
   location: string;
+  coordinates?: GeoPoint;
   price: number;
   popularity?: number;
 }
@@ -43,6 +45,7 @@ export class CreateProductUseCase {
       category: command.category,
       subcategories: command.subcategories,
       location: command.location,
+      coordinates: command.coordinates,
       price: command.price,
       popularity: command.popularity ?? 0,
       createdAt: new Date(),

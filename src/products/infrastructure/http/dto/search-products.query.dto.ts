@@ -1,6 +1,16 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 import { SortDirection, SortField } from '@/products/domain/search/search-criteria';
 
 /** Accepts both `?categories=a,b` and repeated `?categories=a&categories=b`. */
@@ -16,6 +26,7 @@ export class SearchProductsQueryDto {
   @ApiPropertyOptional({ description: 'Free text query matched against name, category and more' })
   @IsOptional()
   @IsString()
+  @MaxLength(200)
   q?: string;
 
   @ApiPropertyOptional({ description: 'Category filter', example: 'Electronics,Books' })
@@ -52,6 +63,30 @@ export class SearchProductsQueryDto {
   @IsNumber()
   @Min(0)
   maxPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Latitude of the search origin', example: 40.4168 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  lat?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude of the search origin', example: -3.7038 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  lon?: number;
+
+  @ApiPropertyOptional({ description: 'Radius in kilometers around the origin', example: 25 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.1)
+  @Max(20000)
+  radiusKm?: number;
 
   @ApiPropertyOptional({ enum: SortField, default: SortField.RELEVANCE })
   @IsOptional()

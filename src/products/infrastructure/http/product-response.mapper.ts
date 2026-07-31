@@ -1,5 +1,6 @@
+import { GeoPoint } from '@/products/domain/geo';
 import { Product } from '@/products/domain/product';
-import { ProductSearchResult } from '@/products/domain/search/search-result';
+import { HitHighlights, ProductSearchResult } from '@/products/domain/search/search-result';
 
 export interface ProductResponse {
   id: string;
@@ -8,13 +9,20 @@ export interface ProductResponse {
   category: string;
   subcategories: string[];
   location: string;
+  coordinates?: GeoPoint;
   price: number;
   popularity: number;
   createdAt: string;
 }
 
+export interface SearchHitResponse extends ProductResponse {
+  score: number;
+  highlights?: HitHighlights;
+  distanceKm?: number;
+}
+
 export interface SearchResponse {
-  data: Array<ProductResponse & { score: number }>;
+  data: SearchHitResponse[];
   meta: {
     total: number;
     page: number;
@@ -32,6 +40,7 @@ function toProductResponse(product: {
   category: string;
   subcategories: string[];
   location: string;
+  coordinates?: GeoPoint;
   price: number;
   popularity: number;
   createdAt: Date;
@@ -43,6 +52,7 @@ function toProductResponse(product: {
     category: product.category,
     subcategories: product.subcategories,
     location: product.location,
+    ...(product.coordinates ? { coordinates: product.coordinates } : {}),
     price: product.price,
     popularity: product.popularity,
     createdAt: new Date(product.createdAt).toISOString(),
@@ -54,6 +64,8 @@ export function toSearchResponse(result: ProductSearchResult): SearchResponse {
     data: result.hits.map((hit) => ({
       ...toProductResponse(hit.product),
       score: hit.score,
+      ...(hit.highlights ? { highlights: hit.highlights } : {}),
+      ...(hit.distanceKm !== undefined ? { distanceKm: hit.distanceKm } : {}),
     })),
     meta: {
       total: result.total,

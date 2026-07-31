@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Max,
   Min,
   MinLength,
 } from 'class-validator';
@@ -36,6 +37,22 @@ export class CreateProductDto {
   @IsString()
   @MinLength(1)
   location!: string;
+
+  @ApiPropertyOptional({ description: 'Latitude of the product location', example: 40.4168 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-90)
+  @Max(90)
+  latitude?: number;
+
+  @ApiPropertyOptional({ description: 'Longitude of the product location', example: -3.7038 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(-180)
+  @Max(180)
+  longitude?: number;
 
   @ApiProperty({ example: 899.99 })
   @Type(() => Number)

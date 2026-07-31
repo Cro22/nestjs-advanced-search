@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -13,7 +14,10 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
 import { CreateProductUseCase } from '@/products/application/use-cases/create-product.use-case';
-import { SearchUnavailableError } from '@/products/domain/search/search.errors';
+import {
+  InvalidSearchQueryError,
+  SearchUnavailableError,
+} from '@/products/domain/search/search.errors';
 import { SearchProductsQueryDto } from '@/products/infrastructure/http/dto/search-products.query.dto';
 import { AutocompleteQueryDto } from '@/products/infrastructure/http/dto/autocomplete.query.dto';
 import { CreateProductDto } from '@/products/infrastructure/http/dto/create-product.dto';
@@ -46,8 +50,8 @@ export class ProductsController {
       'Full text search with relevance ranking, combined faceting, filters, pagination, sorting and query suggestions.',
   })
   async search(@Query() query: SearchProductsQueryDto) {
-    const criteria = toSearchCriteria(query, this.maxPageSize);
     try {
+      const criteria = toSearchCriteria(query, this.maxPageSize);
       const result = await this.searchProducts.execute(criteria);
       return toSearchResponse(result);
     } catch (error) {
@@ -78,12 +82,19 @@ export class ProductsController {
     description: 'Persists the product in Postgres and projects it into Elasticsearch.',
   })
   async create(@Body() dto: CreateProductDto) {
+    if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
+      throw new BadRequestException('latitude and longitude must be provided together');
+    }
     const product = await this.createProduct.execute({
       name: dto.name,
       description: dto.description,
       category: dto.category,
       subcategories: dto.subcategories,
       location: dto.location,
+      coordinates:
+        dto.latitude !== undefined && dto.longitude !== undefined
+          ? { lat: dto.latitude, lon: dto.longitude }
+          : undefined,
       price: dto.price,
       popularity: dto.popularity,
     });
@@ -91,10 +102,14 @@ export class ProductsController {
   }
 
   /**
-   * Translate domain errors into their HTTP counterparts. A search backend
-   * outage becomes a clean 503 instead of leaking the raw Elasticsearch error.
+   * Translate domain errors into their HTTP counterparts. A malformed request
+   * is the caller's mistake (400); a search backend outage becomes a clean 503
+   * instead of leaking the raw Elasticsearch error.
    */
   private rethrow(error: unknown): never {
+    if (error instanceof InvalidSearchQueryError) {
+      throw new BadRequestException(error.message);
+    }
     if (error instanceof SearchUnavailableError) {
       throw new ServiceUnavailableException(error.message);
     }
