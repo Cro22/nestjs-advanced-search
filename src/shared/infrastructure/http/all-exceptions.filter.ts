@@ -33,6 +33,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const status =
       exception instanceof HttpException ? exception.getStatus() : HttpStatus.INTERNAL_SERVER_ERROR;
 
+    if (exception instanceof HttpException) {
+      const payload = exception.getResponse();
+      if (typeof payload === 'object' && payload !== null && !('message' in payload)) {
+        // Structured payloads (for example the terminus health report) carry
+        // their own shape; the envelope below is for plain error messages.
+        response.status(status).json(payload);
+        return;
+      }
+    }
+
     const body: ErrorBody = {
       statusCode: status,
       error: HttpStatus[status] ?? 'Error',
