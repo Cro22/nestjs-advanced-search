@@ -184,7 +184,7 @@ Useful scripts:
 | `npm run bootstrap`       | Run db:push, db:seed and search:reindex in order|
 | `npm test`                | Run the unit test suite                         |
 | `npm run test:e2e`        | Run the end to end suite (needs Docker)         |
-| `npm run test:cov`        | Run tests with coverage                         |
+| `npm run test:cov`        | Run tests with coverage, enforced thresholds    |
 | `npm run lint`            | Lint and autofix                                |
 | `npm run lint:check`      | Lint without fixing (used by CI)                |
 

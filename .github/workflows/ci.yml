@@ -19,7 +19,8 @@ jobs:
       - run: npx prisma generate
       - run: npm run lint:check
       - run: npm run build
-      - run: npm test
+      # test:cov enforces the coverageThreshold in package.json
+      - run: npm run test:cov
 
   e2e:
     name: end to end tests
