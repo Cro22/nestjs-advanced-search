@@ -62,46 +62,123 @@ interface ProductSuggest {
 @Injectable()
 export class EsProductSearchAdapter implements ProductSearchIndex {
   private readonly logger = new Logger(EsProductSearchAdapter.name);
-  private readonly baseIndexName: string;
-  private readonly indexName: string;
+  /** Alias every read and live write goes through. */
+  private readonly aliasName: string;
+  /** Prefix of the physical indices for the current schema version. */
+  private readonly physicalPrefix: string;
+  /** Physical staging index while a rebuild is in flight, else null. */
+  private stagingIndex: string | null = null;
 
   constructor(
     @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
     config: ConfigService,
   ) {
-    // The physical index name embeds the schema version. Bumping the version
-    // makes the count based idempotency check see an empty index, so the boot
-    // time reindex rebuilds with the new mapping and no entrypoint changes.
-    this.baseIndexName = config.get<string>('elasticsearch.index', 'products');
-    this.indexName = `${this.baseIndexName}_v${SEARCH_SCHEMA_VERSION}`;
+    // Reads target a stable alias while writes during a rebuild go to a fresh
+    // physical index named {alias}_v{schema}_{timestamp}. Swapping the alias
+    // at the end makes reindexing invisible to searchers, and the embedded
+    // schema version lets the boot reindex detect a mapping change.
+    this.aliasName = config.get<string>('elasticsearch.index', 'products');
+    this.physicalPrefix = `${this.aliasName}_v${SEARCH_SCHEMA_VERSION}`;
+  }
+
+  private newPhysicalName(): string {
+    return `${this.physicalPrefix}_${Date.now()}`;
   }
 
   async ensureIndex(): Promise<void> {
-    const exists = await this.client.indices.exists({ index: this.indexName });
-    if (!exists) {
-      await this.createIndex();
-      this.logger.log(`Created index "${this.indexName}"`);
+    const aliasExists = await this.client.indices.existsAlias({ name: this.aliasName });
+    if (aliasExists) {
+      return;
+    }
+    // A concrete index squatting on the alias name (a volume from before the
+    // alias strategy) is dropped: Postgres is the source of truth and the
+    // boot reindex rebuilds the projection right after.
+    const bareIndex = await this.client.indices.exists({ index: this.aliasName });
+    if (bareIndex) {
+      await this.client.indices.delete({ index: this.aliasName });
+      this.logger.log(`Deleted legacy index "${this.aliasName}" to free the alias name`);
+    }
+    const physical = this.newPhysicalName();
+    await this.createIndex(physical);
+    await this.client.indices.putAlias({ index: physical, name: this.aliasName });
+    this.logger.log(`Created index "${physical}" behind alias "${this.aliasName}"`);
+  }
+
+  async startRebuild(): Promise<void> {
+    this.stagingIndex = this.newPhysicalName();
+    await this.createIndex(this.stagingIndex);
+    this.logger.log(`Staging rebuild into "${this.stagingIndex}"`);
+  }
+
+  async finishRebuild(): Promise<void> {
+    if (!this.stagingIndex) {
+      throw new Error('finishRebuild called without startRebuild');
+    }
+    const staging = this.stagingIndex;
+
+    // A leftover concrete index on the alias name would make the alias add
+    // fail; clear it before the swap (same legacy case as ensureIndex).
+    const aliasExists = await this.client.indices.existsAlias({ name: this.aliasName });
+    if (!aliasExists) {
+      const bareIndex = await this.client.indices.exists({ index: this.aliasName });
+      if (bareIndex) {
+        await this.client.indices.delete({ index: this.aliasName });
+      }
+    }
+
+    // One atomic action set: readers never observe a missing alias.
+    await this.client.indices.updateAliases({
+      actions: [
+        ...(aliasExists
+          ? [{ remove: { index: `${this.aliasName}_v*`, alias: this.aliasName } }]
+          : []),
+        { add: { index: staging, alias: this.aliasName } },
+      ],
+    });
+    this.stagingIndex = null;
+    this.logger.log(`Alias "${this.aliasName}" now points at "${staging}"`);
+    await this.deleteStalePhysicals(staging);
+  }
+
+  async abortRebuild(): Promise<void> {
+    if (!this.stagingIndex) {
+      return;
+    }
+    const staging = this.stagingIndex;
+    this.stagingIndex = null;
+    try {
+      await this.client.indices.delete({ index: staging });
+      this.logger.warn(`Rebuild aborted, deleted staging index "${staging}"`);
+    } catch (error) {
+      this.logger.warn(
+        `Could not delete staging index "${staging}": ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
     }
   }
 
-  async recreateIndex(): Promise<void> {
-    const exists = await this.client.indices.exists({ index: this.indexName });
-    if (exists) {
-      await this.client.indices.delete({ index: this.indexName });
+  async isCurrentSchema(): Promise<boolean> {
+    try {
+      const aliasExists = await this.client.indices.existsAlias({ name: this.aliasName });
+      if (!aliasExists) {
+        return false;
+      }
+      const resolved = await this.client.indices.getAlias({ name: this.aliasName });
+      return Object.keys(resolved).some((name) => name.startsWith(`${this.physicalPrefix}_`));
+    } catch {
+      return false;
     }
-    await this.createIndex();
-    this.logger.log(`Recreated index "${this.indexName}"`);
-    await this.deleteStaleGenerations();
   }
 
-  /** Best effort removal of indices left behind by earlier schema versions. */
-  private async deleteStaleGenerations(): Promise<void> {
+  /** Best effort removal of physical indices no longer behind the alias. */
+  private async deleteStalePhysicals(current: string): Promise<void> {
     try {
       const existing = await this.client.indices.get({
-        index: [`${this.baseIndexName}_v*`, this.baseIndexName],
+        index: `${this.aliasName}_v*`,
         ignore_unavailable: true,
       });
-      const stale = Object.keys(existing).filter((name) => name !== this.indexName);
+      const stale = Object.keys(existing).filter((name) => name !== current);
       for (const name of stale) {
         await this.client.indices.delete({ index: name });
         this.logger.log(`Deleted stale index "${name}"`);
@@ -114,31 +191,59 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
   }
 
   async countDocuments(): Promise<number> {
-    const exists = await this.client.indices.exists({ index: this.indexName });
-    if (!exists) {
+    const aliasExists = await this.client.indices.existsAlias({ name: this.aliasName });
+    if (!aliasExists) {
       return 0;
     }
-    const response = await this.client.count({ index: this.indexName });
+    const response = await this.client.count({ index: this.aliasName });
     return response.count ?? 0;
   }
 
   async index(product: Product): Promise<void> {
     await this.client.index({
-      index: this.indexName,
+      index: this.aliasName,
       id: product.id,
       document: toDocument(product),
       // wait_for so a product created through the API is searchable on the very
       // next request, keeping the write path consistent for the caller.
       refresh: 'wait_for',
     });
+    // During an in process rebuild, mirror the write into the staging index so
+    // it survives the alias swap. A rebuild running in another process cannot
+    // see this write; the outbox processor repairs that window.
+    if (this.stagingIndex) {
+      await this.client.index({
+        index: this.stagingIndex,
+        id: product.id,
+        document: toDocument(product),
+      });
+    }
+  }
+
+  async remove(productId: string): Promise<void> {
+    try {
+      await this.client.delete({
+        index: this.aliasName,
+        id: productId,
+        refresh: 'wait_for',
+      });
+    } catch (error) {
+      // Deleting an already absent document is success, not failure.
+      if (!(error instanceof errors.ResponseError && error.statusCode === 404)) {
+        throw error;
+      }
+    }
   }
 
   async bulkIndex(products: Product[]): Promise<void> {
     if (products.length === 0) {
       return;
     }
+    // While a rebuild is staging, batches fill the staging index; the live
+    // alias keeps serving the previous generation untouched.
+    const target = this.stagingIndex ?? this.aliasName;
     const operations = products.flatMap((product) => [
-      { index: { _index: this.indexName, _id: product.id } },
+      { index: { _index: target, _id: product.id } },
       toDocument(product),
     ]);
 
@@ -154,7 +259,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
 
   async search(criteria: ProductSearchCriteria): Promise<ProductSearchResult> {
     const request = {
-      index: this.indexName,
+      index: this.aliasName,
       ...EsQueryBuilder.buildSearchBody(criteria),
     } as unknown as estypes.SearchRequest;
 
@@ -202,7 +307,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
 
   async autocomplete(prefix: string, limit: number): Promise<string[]> {
     const request = {
-      index: this.indexName,
+      index: this.aliasName,
       ...EsQueryBuilder.buildAutocompleteBody(prefix, limit),
     } as unknown as estypes.SearchRequest;
 
@@ -220,9 +325,9 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
 
   // --- helpers -------------------------------------------------------------
 
-  private async createIndex(): Promise<void> {
+  private async createIndex(physicalName: string): Promise<void> {
     await this.client.indices.create({
-      index: this.indexName,
+      index: physicalName,
       ...PRODUCT_INDEX_SETTINGS,
     } as unknown as estypes.IndicesCreateRequest);
   }

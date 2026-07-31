@@ -72,15 +72,114 @@ function buildAdapter(search: jest.Mock) {
 }
 
 describe('EsProductSearchAdapter', () => {
-  it('targets the versioned physical index', async () => {
+  it('searches through the stable alias', async () => {
     const search = jest.fn().mockResolvedValue(searchResponse());
     const adapter = buildAdapter(search);
 
     await adapter.search(criteria());
 
-    expect(search).toHaveBeenCalledWith(
-      expect.objectContaining({ index: `products_v${SEARCH_SCHEMA_VERSION}` }),
-    );
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ index: 'products' }));
+  });
+
+  describe('zero downtime rebuild', () => {
+    function buildRebuildAdapter() {
+      const client = {
+        search: jest.fn(),
+        bulk: jest.fn().mockResolvedValue({ errors: false, items: [] }),
+        indices: {
+          create: jest.fn().mockResolvedValue({}),
+          delete: jest.fn().mockResolvedValue({}),
+          exists: jest.fn().mockResolvedValue(false),
+          existsAlias: jest.fn().mockResolvedValue(true),
+          getAlias: jest.fn(),
+          get: jest.fn().mockResolvedValue({}),
+          updateAliases: jest.fn().mockResolvedValue({}),
+          putAlias: jest.fn().mockResolvedValue({}),
+        },
+      };
+      const config = { get: jest.fn().mockReturnValue('products') } as unknown as ConfigService;
+      return { client, adapter: new EsProductSearchAdapter(client as never, config) };
+    }
+
+    it('bulk indexes into the staging index during a rebuild and swaps at the end', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+
+      await adapter.startRebuild();
+      const staging = client.indices.create.mock.calls[0][0].index as string;
+      expect(staging).toMatch(new RegExp(`^products_v${SEARCH_SCHEMA_VERSION}_\\d+$`));
+
+      await adapter.bulkIndex([
+        {
+          id: '1',
+          name: 'Aurora Laptop',
+          description: 'x',
+          category: 'Electronics',
+          subcategories: [],
+          location: 'Madrid',
+          price: 1,
+          popularity: 0,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        } as never,
+      ]);
+      const operations = client.bulk.mock.calls[0][0].operations as Array<
+        Record<string, { _index: string }>
+      >;
+      expect(operations[0].index._index).toBe(staging);
+
+      await adapter.finishRebuild();
+      const actions = client.indices.updateAliases.mock.calls[0][0].actions;
+      expect(actions).toContainEqual({ add: { index: staging, alias: 'products' } });
+      expect(actions).toContainEqual({ remove: { index: 'products_v*', alias: 'products' } });
+    });
+
+    it('bulk indexes into the alias when no rebuild is staging', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+
+      await adapter.bulkIndex([
+        {
+          id: '1',
+          name: 'Aurora Laptop',
+          description: 'x',
+          category: 'Electronics',
+          subcategories: [],
+          location: 'Madrid',
+          price: 1,
+          popularity: 0,
+          createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        } as never,
+      ]);
+
+      const operations = client.bulk.mock.calls[0][0].operations as Array<
+        Record<string, { _index: string }>
+      >;
+      expect(operations[0].index._index).toBe('products');
+    });
+
+    it('abortRebuild deletes the staging index and resets state', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+
+      await adapter.startRebuild();
+      const staging = client.indices.create.mock.calls[0][0].index as string;
+      await adapter.abortRebuild();
+
+      expect(client.indices.delete).toHaveBeenCalledWith({ index: staging });
+      expect(client.indices.updateAliases).not.toHaveBeenCalled();
+    });
+
+    it('reports the schema as current only when the alias resolves to it', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+
+      client.indices.getAlias.mockResolvedValue({
+        [`products_v${SEARCH_SCHEMA_VERSION}_123`]: {},
+      });
+      await expect(adapter.isCurrentSchema()).resolves.toBe(true);
+
+      client.indices.getAlias.mockResolvedValue({ products_v1_99: {} });
+      await expect(adapter.isCurrentSchema()).resolves.toBe(false);
+
+      client.indices.existsAlias.mockResolvedValue(false);
+      await expect(adapter.isCurrentSchema()).resolves.toBe(false);
+    });
   });
 
   describe('error mapping', () => {

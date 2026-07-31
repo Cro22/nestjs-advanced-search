@@ -7,16 +7,29 @@ import { ProductSearchResult } from '@/products/domain/search/search-result';
  * Owns full text search, relevance, faceting, autocomplete and suggestions.
  */
 export interface ProductSearchIndex {
-  /** Create the index with its analyzers and mappings if it does not exist. */
+  /** Create the live index (with analyzers and mappings) if it does not exist. */
   ensureIndex(): Promise<void>;
 
-  /** Drop and recreate the index. Used before a full reindex. */
-  recreateIndex(): Promise<void>;
+  /**
+   * Zero downtime rebuild protocol. startRebuild creates a fresh staging
+   * index; subsequent bulkIndex calls fill it while the live index keeps
+   * serving; finishRebuild atomically points reads at the staging index and
+   * discards the previous one. abortRebuild throws the staging index away.
+   */
+  startRebuild(): Promise<void>;
+  finishRebuild(): Promise<void>;
+  abortRebuild(): Promise<void>;
 
-  /** Number of documents currently in the index (0 if it does not exist). */
+  /** Whether the live index was built with the current schema version. */
+  isCurrentSchema(): Promise<boolean>;
+
+  /** Number of documents currently in the live index (0 if it does not exist). */
   countDocuments(): Promise<number>;
 
   index(product: Product): Promise<void>;
+
+  /** Remove a document from the index. Missing documents are not an error. */
+  remove(productId: string): Promise<void>;
 
   bulkIndex(products: Product[]): Promise<void>;
 

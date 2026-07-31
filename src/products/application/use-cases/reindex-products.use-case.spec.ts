@@ -32,10 +32,14 @@ describe('ReindexProductsUseCase', () => {
 
     searchIndex = {
       countDocuments: jest.fn(),
-      recreateIndex: jest.fn(),
+      isCurrentSchema: jest.fn().mockResolvedValue(true),
+      startRebuild: jest.fn(),
+      finishRebuild: jest.fn(),
+      abortRebuild: jest.fn(),
       bulkIndex: jest.fn(),
       ensureIndex: jest.fn(),
       index: jest.fn(),
+      remove: jest.fn(),
       search: jest.fn(),
       autocomplete: jest.fn(),
     } as unknown as jest.Mocked<ProductSearchIndex>;
@@ -50,8 +54,21 @@ describe('ReindexProductsUseCase', () => {
     const result = await useCase.execute();
 
     expect(result).toEqual({ indexed: 500, skipped: true });
-    expect(searchIndex.recreateIndex).not.toHaveBeenCalled();
+    expect(searchIndex.startRebuild).not.toHaveBeenCalled();
     expect(searchIndex.bulkIndex).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds when counts match but the index is on an old schema', async () => {
+    repository.count.mockResolvedValue(500);
+    searchIndex.countDocuments.mockResolvedValue(500);
+    searchIndex.isCurrentSchema.mockResolvedValue(false);
+    repository.findBatch.mockResolvedValueOnce({ items: [makeProduct('1')], nextCursor: null });
+
+    const result = await useCase.execute();
+
+    expect(result.skipped).toBe(false);
+    expect(searchIndex.startRebuild).toHaveBeenCalledTimes(1);
+    expect(searchIndex.finishRebuild).toHaveBeenCalledTimes(1);
   });
 
   it('reindexes when the index is out of sync', async () => {
@@ -66,8 +83,10 @@ describe('ReindexProductsUseCase', () => {
 
     expect(result.skipped).toBe(false);
     expect(result.indexed).toBe(2);
-    expect(searchIndex.recreateIndex).toHaveBeenCalledTimes(1);
+    expect(searchIndex.startRebuild).toHaveBeenCalledTimes(1);
     expect(searchIndex.bulkIndex).toHaveBeenCalledTimes(1);
+    expect(searchIndex.finishRebuild).toHaveBeenCalledTimes(1);
+    expect(searchIndex.abortRebuild).not.toHaveBeenCalled();
   });
 
   it('rebuilds even when in sync if forced', async () => {
@@ -80,7 +99,7 @@ describe('ReindexProductsUseCase', () => {
     expect(result.skipped).toBe(false);
     // The in sync short circuit must not even look at the index count when forced.
     expect(searchIndex.countDocuments).not.toHaveBeenCalled();
-    expect(searchIndex.recreateIndex).toHaveBeenCalledTimes(1);
+    expect(searchIndex.startRebuild).toHaveBeenCalledTimes(1);
   });
 
   it('reindexes an empty database (count 0) rather than skipping', async () => {
@@ -90,8 +109,24 @@ describe('ReindexProductsUseCase', () => {
 
     const result = await useCase.execute();
 
-    // total 0 is not treated as in sync, so the index is still recreated clean.
+    // total 0 is not treated as in sync, so a clean index is still built.
     expect(result.skipped).toBe(false);
-    expect(searchIndex.recreateIndex).toHaveBeenCalledTimes(1);
+    expect(searchIndex.startRebuild).toHaveBeenCalledTimes(1);
+    expect(searchIndex.finishRebuild).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts the staging index when a batch fails, leaving the live one alone', async () => {
+    repository.count.mockResolvedValue(2);
+    searchIndex.countDocuments.mockResolvedValue(0);
+    repository.findBatch.mockResolvedValueOnce({
+      items: [makeProduct('1'), makeProduct('2')],
+      nextCursor: null,
+    });
+    searchIndex.bulkIndex.mockRejectedValue(new Error('bulk exploded'));
+
+    await expect(useCase.execute()).rejects.toThrow('bulk exploded');
+
+    expect(searchIndex.abortRebuild).toHaveBeenCalledTimes(1);
+    expect(searchIndex.finishRebuild).not.toHaveBeenCalled();
   });
 });
