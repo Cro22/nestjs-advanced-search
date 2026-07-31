@@ -136,6 +136,7 @@ export async function resetData(app: INestApplication): Promise<void> {
   const redis = app.get<Redis>(REDIS_CLIENT);
   const reindex = app.get(ReindexProductsUseCase);
 
+  await prisma.outboxEntry.deleteMany();
   await prisma.product.deleteMany();
   await prisma.product.createMany({
     data: FIXTURES.map((fixture) => ({ id: randomUUID(), ...fixture })),

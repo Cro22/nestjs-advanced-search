@@ -2,10 +2,15 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
+  Param,
+  ParseUUIDPipe,
   Post,
+  Put,
   Query,
   ServiceUnavailableException,
 } from '@nestjs/common';
@@ -16,6 +21,10 @@ import { AUTOCOMPLETE_THROTTLE } from '@/shared/infrastructure/http/throttle.con
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
 import { CreateProductUseCase } from '@/products/application/use-cases/create-product.use-case';
+import { UpdateProductUseCase } from '@/products/application/use-cases/update-product.use-case';
+import { DeleteProductUseCase } from '@/products/application/use-cases/delete-product.use-case';
+import { RecordProductViewUseCase } from '@/products/application/use-cases/record-product-view.use-case';
+import { ProductNotFoundError } from '@/products/domain/product.errors';
 import {
   InvalidSearchQueryError,
   SearchUnavailableError,
@@ -39,6 +48,9 @@ export class ProductsController {
     private readonly searchProducts: SearchProductsUseCase,
     private readonly autocomplete: AutocompleteUseCase,
     private readonly createProduct: CreateProductUseCase,
+    private readonly updateProduct: UpdateProductUseCase,
+    private readonly deleteProduct: DeleteProductUseCase,
+    private readonly recordView: RecordProductViewUseCase,
     config: ConfigService,
   ) {
     this.maxPageSize = config.get<number>('search.maxPageSize', 100);
@@ -105,14 +117,78 @@ export class ProductsController {
     return toProductResponseFromDomain(product);
   }
 
+  @Put(':id')
+  @ApiOperation({
+    summary: 'Update a product',
+    description:
+      'Full replacement. Keeps the identity, creation date and, unless provided, the accumulated popularity. The change is searchable on the next request.',
+  })
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateProductDto) {
+    if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
+      throw new BadRequestException('latitude and longitude must be provided together');
+    }
+    try {
+      const product = await this.updateProduct.execute({
+        id,
+        name: dto.name,
+        description: dto.description,
+        category: dto.category,
+        subcategories: dto.subcategories,
+        location: dto.location,
+        coordinates:
+          dto.latitude !== undefined && dto.longitude !== undefined
+            ? { lat: dto.latitude, lon: dto.longitude }
+            : undefined,
+        price: dto.price,
+        popularity: dto.popularity,
+      });
+      return toProductResponseFromDomain(product);
+    } catch (error) {
+      this.rethrow(error);
+    }
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a product',
+    description: 'Removes the product from Postgres and from the search index.',
+  })
+  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    try {
+      await this.deleteProduct.execute(id);
+    } catch (error) {
+      this.rethrow(error);
+    }
+  }
+
+  @Post(':id/view')
+  @ApiOperation({
+    summary: 'Record a product view',
+    description:
+      'Increments the popularity signal that feeds relevance boosting and popularity sorting.',
+  })
+  async view(@Param('id', ParseUUIDPipe) id: string) {
+    try {
+      const product = await this.recordView.execute(id);
+      return { id: product.id, popularity: product.popularity };
+    } catch (error) {
+      this.rethrow(error);
+    }
+  }
+
   /**
    * Translate domain errors into their HTTP counterparts. A malformed request
-   * is the caller's mistake (400); a search backend outage becomes a clean 503
-   * instead of leaking the raw Elasticsearch error.
+   * is the caller's mistake (400), a missing product is a 404, and a search
+   * backend outage becomes a clean 503 instead of leaking the raw
+   * Elasticsearch error.
    */
   private rethrow(error: unknown): never {
     if (error instanceof InvalidSearchQueryError) {
       throw new BadRequestException(error.message);
+    }
+    if (error instanceof ProductNotFoundError) {
+      throw new NotFoundException(error.message);
     }
     if (error instanceof SearchUnavailableError) {
       throw new ServiceUnavailableException(error.message);

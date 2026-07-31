@@ -11,6 +11,9 @@ import { CACHE_PORT } from '@/products/domain/ports/cache.port';
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
 import { CreateProductUseCase } from '@/products/application/use-cases/create-product.use-case';
+import { UpdateProductUseCase } from '@/products/application/use-cases/update-product.use-case';
+import { DeleteProductUseCase } from '@/products/application/use-cases/delete-product.use-case';
+import { RecordProductViewUseCase } from '@/products/application/use-cases/record-product-view.use-case';
 import { ReindexProductsUseCase } from '@/products/application/use-cases/reindex-products.use-case';
 
 import { PrismaService } from '@/products/infrastructure/persistence/prisma/prisma.service';
@@ -57,6 +60,9 @@ import { OutboxProcessor } from '@/products/infrastructure/outbox/outbox.process
     SearchProductsUseCase,
     AutocompleteUseCase,
     CreateProductUseCase,
+    UpdateProductUseCase,
+    DeleteProductUseCase,
+    RecordProductViewUseCase,
     ReindexProductsUseCase,
   ],
   exports: [
