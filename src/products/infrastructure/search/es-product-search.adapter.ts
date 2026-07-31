@@ -1,16 +1,21 @@
-import { Client, estypes } from '@elastic/elasticsearch';
+import { Client, errors, estypes } from '@elastic/elasticsearch';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Product } from '@/products/domain/product';
 import { ProductSearchIndex } from '@/products/domain/ports/product-search-index.repository';
-import { ProductSearchCriteria } from '@/products/domain/search/search-criteria';
+import { ProductSearchCriteria, SortField } from '@/products/domain/search/search-criteria';
 import {
   FacetBucket,
+  HitHighlights,
   PriceStats,
   ProductSearchResult,
   ProductView,
 } from '@/products/domain/search/search-result';
-import { SearchUnavailableError } from '@/products/domain/search/search.errors';
+import {
+  InvalidSearchQueryError,
+  SearchUnavailableError,
+} from '@/products/domain/search/search.errors';
+import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
 import { ELASTICSEARCH_CLIENT } from '@/products/infrastructure/search/elasticsearch.client';
 import { EsQueryBuilder } from '@/products/infrastructure/search/es-query.builder';
 import {
@@ -57,13 +62,18 @@ interface ProductSuggest {
 @Injectable()
 export class EsProductSearchAdapter implements ProductSearchIndex {
   private readonly logger = new Logger(EsProductSearchAdapter.name);
+  private readonly baseIndexName: string;
   private readonly indexName: string;
 
   constructor(
     @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
     config: ConfigService,
   ) {
-    this.indexName = config.get<string>('elasticsearch.index', 'products');
+    // The physical index name embeds the schema version. Bumping the version
+    // makes the count based idempotency check see an empty index, so the boot
+    // time reindex rebuilds with the new mapping and no entrypoint changes.
+    this.baseIndexName = config.get<string>('elasticsearch.index', 'products');
+    this.indexName = `${this.baseIndexName}_v${SEARCH_SCHEMA_VERSION}`;
   }
 
   async ensureIndex(): Promise<void> {
@@ -81,6 +91,26 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
     }
     await this.createIndex();
     this.logger.log(`Recreated index "${this.indexName}"`);
+    await this.deleteStaleGenerations();
+  }
+
+  /** Best effort removal of indices left behind by earlier schema versions. */
+  private async deleteStaleGenerations(): Promise<void> {
+    try {
+      const existing = await this.client.indices.get({
+        index: [`${this.baseIndexName}_v*`, this.baseIndexName],
+        ignore_unavailable: true,
+      });
+      const stale = Object.keys(existing).filter((name) => name !== this.indexName);
+      for (const name of stale) {
+        await this.client.indices.delete({ index: name });
+        this.logger.log(`Deleted stale index "${name}"`);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not clean up stale indices: ${error instanceof Error ? error.message : error}`,
+      );
+    }
   }
 
   async countDocuments(): Promise<number> {
@@ -132,13 +162,20 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
     try {
       response = await this.client.search<ProductDocument>(request);
     } catch (error) {
-      throw this.unavailable('search', error);
+      throw this.mapError('search', error);
     }
 
-    const hits = (response.hits.hits ?? []).map((hit) => ({
-      product: this.toView(hit._source as ProductDocument),
-      score: hit._score ?? 0,
-    }));
+    const withDistance = criteria.sort.field === SortField.DISTANCE;
+    const hits = (response.hits.hits ?? []).map((hit) => {
+      const highlights = this.readHighlights(hit.highlight);
+      const distanceKm = withDistance ? this.readDistance(hit.sort) : undefined;
+      return {
+        product: this.toView(hit._source as ProductDocument),
+        score: hit._score ?? 0,
+        ...(highlights ? { highlights } : {}),
+        ...(distanceKm !== undefined ? { distanceKm } : {}),
+      };
+    });
 
     const total =
       typeof response.hits.total === 'number'
@@ -173,7 +210,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
     try {
       response = await this.client.search<ProductDocument>(request);
     } catch (error) {
-      throw this.unavailable('autocomplete', error);
+      throw this.mapError('autocomplete', error);
     }
 
     return (response.hits.hits ?? [])
@@ -190,13 +227,43 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
     } as unknown as estypes.IndicesCreateRequest);
   }
 
-  /** Log the raw failure and surface a clean domain error to the callers. */
-  private unavailable(operation: string, error: unknown): SearchUnavailableError {
+  /**
+   * Log the raw failure and surface a clean domain error. A 400 class response
+   * means the request itself was rejected (client mistake, reported as such);
+   * anything else (connectivity, timeouts, 429, 5xx) is a backend outage.
+   */
+  private mapError(operation: string, error: unknown): Error {
     this.logger.error(
       `Elasticsearch ${operation} failed`,
       error instanceof Error ? error.stack : String(error),
     );
+    if (error instanceof errors.ResponseError && error.statusCode === 400) {
+      return new InvalidSearchQueryError();
+    }
     return new SearchUnavailableError();
+  }
+
+  private readHighlights(
+    highlight: Record<string, string[]> | undefined,
+  ): HitHighlights | undefined {
+    const name = highlight?.name?.[0];
+    const description = highlight?.description?.[0];
+    if (!name && !description) {
+      return undefined;
+    }
+    return {
+      ...(name ? { name } : {}),
+      ...(description ? { description } : {}),
+    };
+  }
+
+  /** The first sort value of a geo distance sort is the distance in km. */
+  private readDistance(sort: estypes.SortResults | undefined): number | undefined {
+    const value = Number(sort?.[0]);
+    if (!Number.isFinite(value)) {
+      return undefined;
+    }
+    return Math.round(value * 100) / 100;
   }
 
   private toView(source: ProductDocument): ProductView {
@@ -207,6 +274,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
       category: source.category,
       subcategories: source.subcategories,
       location: source.location,
+      ...(source.coordinates ? { coordinates: source.coordinates } : {}),
       price: source.price,
       popularity: source.popularity,
       createdAt: new Date(source.createdAt),

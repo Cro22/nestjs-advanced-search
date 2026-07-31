@@ -76,6 +76,41 @@ describe('EsQueryBuilder.buildSearchBody', () => {
     expect(clauses).toContainEqual({ range: { price: { gte: 50 } } });
   });
 
+  describe('geo filtering', () => {
+    const geo = { lat: 40.4168, lon: -3.7038, radiusKm: 25 };
+
+    it('adds a geo_distance clause to the post_filter when a radius is set', () => {
+      const body = EsQueryBuilder.buildSearchBody(criteria({ filters: { geo } }));
+      const clauses = (body.post_filter as any).bool.filter;
+
+      expect(clauses).toContainEqual({
+        geo_distance: {
+          distance: '25km',
+          coordinates: { lat: 40.4168, lon: -3.7038 },
+        },
+      });
+    });
+
+    it('omits the geo clause when there is no radius (origin only sorts)', () => {
+      const body = EsQueryBuilder.buildSearchBody(
+        criteria({ filters: { geo: { lat: 40.4168, lon: -3.7038 } } }),
+      );
+      expect(body.post_filter).toEqual({ match_all: {} });
+    });
+
+    it('constrains every facet with the geo radius', () => {
+      const aggs = EsQueryBuilder.buildSearchBody(criteria({ filters: { geo } })).aggs as any;
+      for (const facet of ['categories', 'subcategories', 'locations', 'price_stats']) {
+        expect(aggs[facet].filter.bool.filter).toContainEqual({
+          geo_distance: {
+            distance: '25km',
+            coordinates: { lat: 40.4168, lon: -3.7038 },
+          },
+        });
+      }
+    });
+  });
+
   describe('combined faceting', () => {
     it('excludes a facet own filter but applies every other active filter', () => {
       const filters: ProductSearchFilters = {
@@ -125,6 +160,37 @@ describe('EsQueryBuilder.buildSearchBody', () => {
       const body = EsQueryBuilder.buildSearchBody(criteria());
       expect(body.sort).toEqual([{ _score: 'desc' }, { popularity: 'desc' }]);
     });
+
+    it('sorts by geo distance from the origin with a score tie breaker', () => {
+      const body = EsQueryBuilder.buildSearchBody(
+        criteria({
+          filters: { geo: { lat: 40.4168, lon: -3.7038 } },
+          sort: { field: SortField.DISTANCE, direction: SortDirection.ASC },
+        }),
+      );
+      expect(body.sort).toEqual([
+        {
+          _geo_distance: {
+            coordinates: { lat: 40.4168, lon: -3.7038 },
+            order: 'asc',
+            unit: 'km',
+          },
+        },
+        { _score: 'desc' },
+      ]);
+    });
+  });
+
+  describe('highlighting', () => {
+    it('asks for highlights only when there is a text query', () => {
+      const withText = EsQueryBuilder.buildSearchBody(criteria({ text: 'laptop' })) as any;
+      expect(withText.highlight.fields.name).toEqual({ number_of_fragments: 0 });
+      expect(withText.highlight.fields.description.fragment_size).toBe(160);
+      expect(withText.highlight.pre_tags).toEqual(['<em>']);
+
+      const withoutText = EsQueryBuilder.buildSearchBody(criteria());
+      expect(withoutText.highlight).toBeUndefined();
+    });
   });
 
   describe('suggestions', () => {
@@ -135,16 +201,31 @@ describe('EsQueryBuilder.buildSearchBody', () => {
       const withoutText = EsQueryBuilder.buildSearchBody(criteria());
       expect(withoutText.suggest).toBeUndefined();
     });
+
+    it('collates suggestions and only accepts confident corrections', () => {
+      const phrase = (EsQueryBuilder.buildSearchBody(criteria({ text: 'labtop' })).suggest as any)
+        .alternatives.phrase;
+
+      expect(phrase.confidence).toBe(1.0);
+      expect(phrase.collate.query.source.match.name.query).toBe('{{suggestion}}');
+      expect(phrase.collate.prune).toBe(false);
+    });
   });
 });
 
 describe('EsQueryBuilder.buildAutocompleteBody', () => {
-  it('uses a bool_prefix multi_match over the search_as_you_type field', () => {
+  it('boosts exact prefixes over the fuzzy rescue clause', () => {
     const body = EsQueryBuilder.buildAutocompleteBody('lap', 5) as any;
+    const [prefixClause, fuzzyClause] = body.query.bool.should;
 
     expect(body.size).toBe(5);
-    expect(body.query.multi_match.type).toBe('bool_prefix');
-    expect(body.query.multi_match.fields).toContain('name.sat');
+    expect(prefixClause.multi_match.type).toBe('bool_prefix');
+    expect(prefixClause.multi_match.fields).toContain('name.sat');
+    expect(prefixClause.multi_match.boost).toBe(3);
+
+    expect(fuzzyClause.match['name.sat'].fuzziness).toBe('AUTO');
+    expect(fuzzyClause.match['name.sat'].prefix_length).toBe(1);
+    expect(body.query.bool.minimum_should_match).toBe(1);
   });
 
   it('collapses on the exact name to avoid duplicate suggestions', () => {

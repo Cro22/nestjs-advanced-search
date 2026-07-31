@@ -40,6 +40,10 @@ export class EsQueryBuilder {
       body.suggest = suggest;
     }
 
+    if (criteria.text) {
+      body.highlight = this.buildHighlight();
+    }
+
     return body;
   }
 
@@ -50,10 +54,33 @@ export class EsQueryBuilder {
       // Collapse on the exact name so duplicate product names appear once.
       collapse: { field: 'name.keyword' },
       query: {
-        multi_match: {
-          query: prefix,
-          type: 'bool_prefix',
-          fields: ['name.sat', 'name.sat._2gram', 'name.sat._3gram'],
+        bool: {
+          should: [
+            // Exact prefixes, boosted so they always outrank fuzzy corrections.
+            {
+              multi_match: {
+                query: prefix,
+                type: 'bool_prefix',
+                boost: 3,
+                fields: ['name.sat', 'name.sat._2gram', 'name.sat._3gram'],
+              },
+            },
+            // Typo tolerance lives in a separate clause: fuzziness inside a
+            // bool_prefix multi_match never reaches the final prefix term and
+            // misbehaves on the shingle subfields, so a plain fuzzy match on
+            // the root field is the reliable way to rescue "laptp".
+            {
+              match: {
+                'name.sat': {
+                  query: prefix,
+                  fuzziness: 'AUTO',
+                  prefix_length: 1,
+                  operator: 'and',
+                },
+              },
+            },
+          ],
+          minimum_should_match: 1,
         },
       },
     };
@@ -117,6 +144,7 @@ export class EsQueryBuilder {
       ...this.subcategoryClause(filters),
       ...this.locationClause(filters),
       ...this.priceClause(filters),
+      ...this.geoClause(filters),
     ];
   }
 
@@ -147,16 +175,33 @@ export class EsQueryBuilder {
     return [{ range: { price: range } }];
   }
 
+  private static geoClause(filters: ProductSearchFilters): EsClause[] {
+    const geo = filters.geo;
+    if (!geo?.radiusKm) {
+      return [];
+    }
+    return [
+      {
+        geo_distance: {
+          distance: `${geo.radiusKm}km`,
+          coordinates: { lat: geo.lat, lon: geo.lon },
+        },
+      },
+    ];
+  }
+
   // --- aggregations (facets) ----------------------------------------------
 
   private static buildAggregations(filters: ProductSearchFilters): EsClause {
-    // Each facet is filtered by every OTHER active filter.
+    // Each facet is filtered by every OTHER active filter. The geo radius has
+    // no facet of its own, so it constrains every facet unconditionally.
     const others = (exclude: keyof ProductSearchFilters): EsClause[] => {
       const clauses: EsClause[] = [];
       if (exclude !== 'categories') clauses.push(...this.categoryClause(filters));
       if (exclude !== 'subcategories') clauses.push(...this.subcategoryClause(filters));
       if (exclude !== 'locations') clauses.push(...this.locationClause(filters));
       if (exclude !== 'price') clauses.push(...this.priceClause(filters));
+      clauses.push(...this.geoClause(filters));
       return clauses;
     };
 
@@ -191,10 +236,44 @@ export class EsQueryBuilder {
         return [{ popularity: dir }, { _score: 'desc' }];
       case SortField.CREATED_AT:
         return [{ createdAt: dir }];
+      case SortField.DISTANCE: {
+        // The HTTP mapper guarantees a geo origin whenever distance sort is
+        // requested. Documents without coordinates sort last (ES treats a
+        // missing geo_point as an infinite distance).
+        const geo = criteria.filters.geo;
+        if (!geo) {
+          return [{ _score: 'desc' }, { popularity: 'desc' }];
+        }
+        return [
+          {
+            _geo_distance: {
+              coordinates: { lat: geo.lat, lon: geo.lon },
+              order: dir,
+              unit: 'km',
+            },
+          },
+          { _score: 'desc' },
+        ];
+      }
       case SortField.RELEVANCE:
       default:
         return [{ _score: 'desc' }, { popularity: 'desc' }];
     }
+  }
+
+  // --- highlight -----------------------------------------------------------
+
+  private static buildHighlight(): EsClause {
+    return {
+      pre_tags: ['<em>'],
+      post_tags: ['</em>'],
+      fields: {
+        // number_of_fragments 0 returns the entire name highlighted, which is
+        // what a UI wants for a title; descriptions get one short fragment.
+        name: { number_of_fragments: 0 },
+        description: { number_of_fragments: 1, fragment_size: 160 },
+      },
+    };
   }
 
   // --- suggestions ---------------------------------------------------------
@@ -211,8 +290,18 @@ export class EsQueryBuilder {
           size: 3,
           gram_size: 3,
           max_errors: 2,
-          confidence: 0,
+          // Only suggest when the alternative scores better than the input, so
+          // a correct query is not "corrected" into noise.
+          confidence: 1.0,
           direct_generator: [{ field: 'name.trigram', suggest_mode: 'always' }],
+          // Verify each candidate against the index so every suggestion is
+          // guaranteed to return results when the user clicks it.
+          collate: {
+            query: {
+              source: { match: { name: { query: '{{suggestion}}', operator: 'and' } } },
+            },
+            prune: false,
+          },
         },
       },
     };

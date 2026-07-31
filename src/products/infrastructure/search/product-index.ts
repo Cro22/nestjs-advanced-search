@@ -11,6 +11,7 @@ export interface ProductDocument {
   category: string;
   subcategories: string[];
   location: string;
+  coordinates?: { lat: number; lon: number };
   price: number;
   popularity: number;
   createdAt: string;
@@ -24,6 +25,8 @@ export function toDocument(product: Product): ProductDocument {
     category: product.category,
     subcategories: product.subcategories,
     location: product.location,
+    // A geo_point field must be absent when unknown; null is rejected by ES.
+    ...(product.coordinates ? { coordinates: product.coordinates } : {}),
     price: product.price,
     popularity: product.popularity,
     createdAt: product.createdAt.toISOString(),
@@ -90,6 +93,7 @@ export const PRODUCT_INDEX_SETTINGS = {
         analyzer: 'folding',
         fields: { keyword: { type: 'keyword' } },
       },
+      coordinates: { type: 'geo_point' },
       price: { type: 'scaled_float', scaling_factor: 100 },
       popularity: { type: 'integer' },
       createdAt: { type: 'date' },
