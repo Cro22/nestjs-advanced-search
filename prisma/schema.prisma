@@ -31,3 +31,20 @@ model Product {
   @@index([createdAt])
   @@map("products")
 }
+
+/// Transactional outbox for the Elasticsearch projection. Every product write
+/// records an entry in the same transaction; a background processor replays
+/// unprocessed entries against the index, so a temporary Elasticsearch outage
+/// can delay the projection but never lose it.
+model OutboxEntry {
+  id          String    @id @default(uuid()) @db.Uuid
+  productId   String    @map("product_id") @db.Uuid
+  /// "upsert" reprojects the product from Postgres; "delete" removes it.
+  operation   String
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+
+  @@index([processedAt, createdAt])
+  @@map("outbox_entries")
+}

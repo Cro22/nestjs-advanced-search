@@ -7,6 +7,9 @@ export interface AppConfig {
     ttlMs: number;
     limit: number;
   };
+  outbox: {
+    pollMs: number;
+  };
   elasticsearch: {
     node: string;
     index: string;
@@ -30,6 +33,9 @@ export default (): AppConfig => ({
   throttle: {
     ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '120', 10),
+  },
+  outbox: {
+    pollMs: parseInt(process.env.OUTBOX_POLL_MS ?? '5000', 10),
   },
   elasticsearch: {
     node: process.env.ELASTICSEARCH_NODE ?? 'http://localhost:9200',

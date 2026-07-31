@@ -17,6 +17,8 @@ export const envValidationSchema = Joi.object({
   THROTTLE_AUTOCOMPLETE_TTL_MS: Joi.number().default(10000),
   THROTTLE_AUTOCOMPLETE_LIMIT: Joi.number().default(30),
 
+  OUTBOX_POLL_MS: Joi.number().default(5000),
+
   DATABASE_URL: Joi.string().required(),
 
   ELASTICSEARCH_NODE: Joi.string().uri().required(),

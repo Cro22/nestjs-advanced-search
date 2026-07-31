@@ -26,6 +26,7 @@ import {
   RedisCacheAdapter,
 } from '@/products/infrastructure/cache/redis-cache.adapter';
 import { ProductsController } from '@/products/infrastructure/http/products.controller';
+import { OutboxProcessor } from '@/products/infrastructure/outbox/outbox.processor';
 
 @Module({
   controllers: [ProductsController],
@@ -48,6 +49,9 @@ import { ProductsController } from '@/products/infrastructure/http/products.cont
     { provide: PRODUCT_REPOSITORY, useClass: PrismaProductRepository },
     { provide: PRODUCT_SEARCH_INDEX, useClass: EsProductSearchAdapter },
     { provide: CACHE_PORT, useClass: RedisCacheAdapter },
+
+    // Background repair of the search projection
+    OutboxProcessor,
 
     // Use cases
     SearchProductsUseCase,
