@@ -9,6 +9,7 @@ import configuration from '@/config/configuration';
 import { envValidationSchema } from '@/config/env.validation';
 import { ProductsModule } from '@/products/products.module';
 import { HealthModule } from '@/health/health.module';
+import { MetricsModule } from '@/shared/infrastructure/metrics/metrics.module';
 
 @Module({
   imports: [
@@ -29,7 +30,10 @@ import { HealthModule } from '@/health/health.module';
             (req.headers['x-request-id'] as string) ?? randomUUID(),
           redact: ['req.headers.authorization', 'req.headers.cookie'],
           autoLogging: {
-            ignore: (req: IncomingMessage) => (req.url ?? '').includes('/health'),
+            ignore: (req: IncomingMessage) => {
+              const url = req.url ?? '';
+              return url.includes('/health') || url.includes('/metrics');
+            },
           },
           ...(config.get<string>('env') === 'development'
             ? { transport: { target: 'pino-pretty', options: { singleLine: true } } }
@@ -48,6 +52,7 @@ import { HealthModule } from '@/health/health.module';
         ],
       }),
     }),
+    MetricsModule,
     ProductsModule,
     HealthModule,
   ],

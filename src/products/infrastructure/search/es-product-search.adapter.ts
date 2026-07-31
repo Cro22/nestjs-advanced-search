@@ -1,6 +1,7 @@
 import { Client, errors, estypes } from '@elastic/elasticsearch';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetricsService } from '@/shared/infrastructure/metrics/metrics.service';
 import { Product } from '@/products/domain/product';
 import { ProductSearchIndex } from '@/products/domain/ports/product-search-index.repository';
 import { ProductSearchCriteria, SortField } from '@/products/domain/search/search-criteria';
@@ -72,6 +73,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
   constructor(
     @Inject(ELASTICSEARCH_CLIENT) private readonly client: Client,
     config: ConfigService,
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     // Reads target a stable alias while writes during a rebuild go to a fresh
     // physical index named {alias}_v{schema}_{timestamp}. Swapping the alias
@@ -343,8 +345,10 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
       error instanceof Error ? error.stack : String(error),
     );
     if (error instanceof errors.ResponseError && error.statusCode === 400) {
+      this.metrics?.searchErrors.inc({ operation, kind: 'invalid_query' });
       return new InvalidSearchQueryError();
     }
+    this.metrics?.searchErrors.inc({ operation, kind: 'unavailable' });
     return new SearchUnavailableError();
   }
 

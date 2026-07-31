@@ -1,5 +1,13 @@
-import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+  Optional,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { MetricsService } from '@/shared/infrastructure/metrics/metrics.service';
 import {
   PRODUCT_SEARCH_INDEX,
   ProductSearchIndex,
@@ -27,6 +35,7 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     @Inject(PRODUCT_SEARCH_INDEX) private readonly searchIndex: ProductSearchIndex,
     config: ConfigService,
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     this.pollMs = config.get<number>('outbox.pollMs', 5000);
   }
@@ -82,6 +91,12 @@ export class OutboxProcessor implements OnModuleInit, OnModuleDestroy {
       }
       if (processed > 0) {
         this.logger.log(`Outbox drained ${processed} entries`);
+      }
+      if (this.metrics) {
+        const stillPending = await this.prisma.outboxEntry.count({
+          where: { processedAt: null },
+        });
+        this.metrics.outboxPending.set(stillPending);
       }
       return processed;
     } catch (error) {
