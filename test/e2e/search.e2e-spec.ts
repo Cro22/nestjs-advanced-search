@@ -49,6 +49,36 @@ describe('GET /api/products/search (e2e)', () => {
     expect(res.body.data[0].name).toMatch(/Laptop/);
   });
 
+  it('expands synonyms at search time: notebook finds laptops', async () => {
+    const res = await request(http)
+      .get('/api/products/search')
+      .query({ q: 'notebook' })
+      .expect(200);
+
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0].name).toMatch(/Laptop/);
+  });
+
+  it('expands synonyms for accessories: earphones find headphones', async () => {
+    const res = await request(http)
+      .get('/api/products/search')
+      .query({ q: 'earphones' })
+      .expect(200);
+
+    expect(res.body.data.some((hit: { name: string }) => hit.name === 'Cobalt Headphones')).toBe(
+      true,
+    );
+  });
+
+  it('stems plurals so laptops matches laptop exactly', async () => {
+    const res = await request(http).get('/api/products/search').query({ q: 'laptops' }).expect(200);
+
+    expect(res.body.data.length).toBeGreaterThan(0);
+    expect(res.body.data[0].name).toMatch(/Laptop/);
+    // Exact stemmed match, not just a fuzzy rescue: highlight proves the hit.
+    expect(res.body.data[0].highlights.name).toContain('<em>');
+  });
+
   it('suggests corrections that are guaranteed to have results', async () => {
     const res = await request(http).get('/api/products/search').query({ q: 'labtop' }).expect(200);
 

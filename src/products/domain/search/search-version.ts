@@ -4,4 +4,4 @@
  * adapter derives the physical index name from it (so a bump triggers a clean
  * reindex on boot) and the cache keys embed it (so stale entries are ignored).
  */
-export const SEARCH_SCHEMA_VERSION = 2;
+export const SEARCH_SCHEMA_VERSION = 3;
