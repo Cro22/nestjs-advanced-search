@@ -418,3 +418,5 @@ These are deliberate choices for the scope of this challenge, called out so the 
 * **Popularity signal.** Views feed popularity live through the view endpoint. Richer signals (clicks, purchases, decay over time) and batched increments would be the next steps for a production ranking pipeline.
 
 * **Single node infrastructure.** The Docker stack runs single node Elasticsearch with security disabled and no Redis or Postgres authentication hardening, which is appropriate for local evaluation but not for production.
+
+* **Dependency audit posture.** Every `npm audit` finding fixable without a breaking change has been applied. The remaining reports sit behind the NestJS 11 major (multer and qs inside `@nestjs/platform-express`, lodash inside `@nestjs/config` and `@nestjs/swagger`) plus dev only tooling (webpack, inquirer and tmp inside `@nestjs/cli`), none of which is reachable in this API: no endpoint accepts multipart uploads, so multer middleware is never registered, and the build tooling never runs in the production image. Upgrading the framework major is the clean path to a silent audit and is left as the next dependency step.
