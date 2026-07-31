@@ -4,6 +4,8 @@ import {
   ProductSearchIndex,
 } from '@/products/domain/ports/product-search-index.repository';
 import { CACHE_PORT, CachePort } from '@/products/domain/ports/cache.port';
+import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
+import { GENERATION_KEY } from '@/products/application/cache-keys';
 
 export interface AutocompleteQuery {
   prefix: string;
@@ -30,7 +32,9 @@ export class AutocompleteUseCase {
       return [];
     }
 
-    const cacheKey = `autocomplete:${limit}:${normalized}`;
+    // Same generation scheme as search keys, so writes invalidate instantly.
+    const generation = (await this.cache.get<number>(GENERATION_KEY)) ?? 0;
+    const cacheKey = `autocomplete:v${SEARCH_SCHEMA_VERSION}:g${generation}:${limit}:${normalized}`;
     const cached = await this.cache.get<string[]>(cacheKey);
     if (cached) {
       return cached;

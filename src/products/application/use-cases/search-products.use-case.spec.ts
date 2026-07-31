@@ -1,4 +1,5 @@
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
+import { GENERATION_KEY } from '@/products/application/cache-keys';
 import { ProductSearchIndex } from '@/products/domain/ports/product-search-index.repository';
 import { CachePort } from '@/products/domain/ports/cache.port';
 import {
@@ -7,6 +8,7 @@ import {
   SortField,
 } from '@/products/domain/search/search-criteria';
 import { ProductSearchResult } from '@/products/domain/search/search-result';
+import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
 
 function baseCriteria(overrides: Partial<ProductSearchCriteria> = {}): ProductSearchCriteria {
   return {
@@ -34,8 +36,17 @@ describe('SearchProductsUseCase', () => {
   let searchIndex: jest.Mocked<ProductSearchIndex>;
   let cache: jest.Mocked<CachePort>;
   let useCase: SearchProductsUseCase;
+  let generation: number | null;
+  let cachedResult: ProductSearchResult | null;
+
+  /** Collect the keys the use case actually searched the cache with. */
+  function searchKeys(): string[] {
+    return cache.get.mock.calls.map(([key]) => key).filter((key) => key.startsWith('search:v'));
+  }
 
   beforeEach(() => {
+    generation = null;
+    cachedResult = null;
     searchIndex = {
       search: jest.fn(),
       autocomplete: jest.fn(),
@@ -45,12 +56,18 @@ describe('SearchProductsUseCase', () => {
       recreateIndex: jest.fn(),
     } as unknown as jest.Mocked<ProductSearchIndex>;
 
-    cache = { get: jest.fn(), set: jest.fn(), del: jest.fn() } as unknown as jest.Mocked<CachePort>;
+    cache = {
+      get: jest.fn((key: string) =>
+        Promise.resolve(key === GENERATION_KEY ? generation : cachedResult),
+      ),
+      set: jest.fn(),
+      del: jest.fn(),
+      incr: jest.fn(),
+    } as unknown as jest.Mocked<CachePort>;
     useCase = new SearchProductsUseCase(searchIndex, cache);
   });
 
   it('queries the search index on a cache miss and stores the result', async () => {
-    cache.get.mockResolvedValue(null);
     searchIndex.search.mockResolvedValue(emptyResult());
 
     await useCase.execute(baseCriteria());
@@ -60,7 +77,7 @@ describe('SearchProductsUseCase', () => {
   });
 
   it('serves from cache without touching the search index on a hit', async () => {
-    cache.get.mockResolvedValue(emptyResult());
+    cachedResult = emptyResult();
 
     await useCase.execute(baseCriteria());
 
@@ -68,16 +85,50 @@ describe('SearchProductsUseCase', () => {
     expect(cache.set).not.toHaveBeenCalled();
   });
 
+  it('builds versioned, generation scoped, hashed keys', async () => {
+    searchIndex.search.mockResolvedValue(emptyResult());
+
+    await useCase.execute(baseCriteria());
+
+    expect(searchKeys()[0]).toMatch(
+      new RegExp(`^search:v${SEARCH_SCHEMA_VERSION}:g0:[0-9a-f]{40}$`),
+    );
+  });
+
   it('produces a stable cache key regardless of filter order', async () => {
-    cache.get.mockResolvedValue(null);
     searchIndex.search.mockResolvedValue(emptyResult());
 
     await useCase.execute(baseCriteria({ filters: { categories: ['A', 'B'] } }));
     await useCase.execute(baseCriteria({ filters: { categories: ['B', 'A'] } }));
 
-    const [firstKey] = cache.get.mock.calls[0];
-    const [secondKey] = cache.get.mock.calls[1];
+    const [firstKey, secondKey] = searchKeys();
     expect(firstKey).toBe(secondKey);
+  });
+
+  it('varies the key when the geo filter changes', async () => {
+    searchIndex.search.mockResolvedValue(emptyResult());
+
+    await useCase.execute(baseCriteria());
+    await useCase.execute(
+      baseCriteria({
+        filters: { categories: ['Electronics'], geo: { lat: 40.4, lon: -3.7, radiusKm: 25 } },
+      }),
+    );
+
+    const [withoutGeo, withGeo] = searchKeys();
+    expect(withoutGeo).not.toBe(withGeo);
+  });
+
+  it('varies the key when the generation is bumped by a write', async () => {
+    searchIndex.search.mockResolvedValue(emptyResult());
+
+    await useCase.execute(baseCriteria());
+    generation = 7;
+    await useCase.execute(baseCriteria());
+
+    const [before, after] = searchKeys();
+    expect(before).toContain(':g0:');
+    expect(after).toContain(':g7:');
   });
 
   it('restores Date objects when reading a result back from the cache', async () => {
@@ -99,7 +150,7 @@ describe('SearchProductsUseCase', () => {
         score: 1,
       },
     ];
-    cache.get.mockResolvedValue(cached);
+    cachedResult = cached;
 
     const result = await useCase.execute(baseCriteria());
 

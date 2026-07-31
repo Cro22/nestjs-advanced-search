@@ -6,6 +6,8 @@ import {
   PRODUCT_SEARCH_INDEX,
   ProductSearchIndex,
 } from '@/products/domain/ports/product-search-index.repository';
+import { CACHE_PORT, CachePort } from '@/products/domain/ports/cache.port';
+import { GENERATION_KEY } from '@/products/application/cache-keys';
 
 export interface CreateProductCommand {
   name: string;
@@ -30,6 +32,7 @@ export class CreateProductUseCase {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly repository: ProductRepository,
     @Inject(PRODUCT_SEARCH_INDEX) private readonly searchIndex: ProductSearchIndex,
+    @Inject(CACHE_PORT) private readonly cache: CachePort,
   ) {}
 
   async execute(command: CreateProductCommand): Promise<Product> {
@@ -46,6 +49,11 @@ export class CreateProductUseCase {
     });
 
     await this.repository.save(product);
+
+    // Bump the generation as soon as the source of truth changed, regardless
+    // of whether indexing succeeds: a later reindex also alters results, and
+    // serving stale cached pages either way would hide the new product.
+    await this.cache.incr(GENERATION_KEY);
 
     try {
       await this.searchIndex.index(product);

@@ -1,6 +1,7 @@
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
 import { ProductSearchIndex } from '@/products/domain/ports/product-search-index.repository';
 import { CachePort } from '@/products/domain/ports/cache.port';
+import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
 
 describe('AutocompleteUseCase', () => {
   let searchIndex: jest.Mocked<ProductSearchIndex>;
@@ -16,7 +17,12 @@ describe('AutocompleteUseCase', () => {
       ensureIndex: jest.fn(),
       recreateIndex: jest.fn(),
     } as unknown as jest.Mocked<ProductSearchIndex>;
-    cache = { get: jest.fn(), set: jest.fn(), del: jest.fn() } as unknown as jest.Mocked<CachePort>;
+    cache = {
+      get: jest.fn(),
+      set: jest.fn(),
+      del: jest.fn(),
+      incr: jest.fn(),
+    } as unknown as jest.Mocked<CachePort>;
     useCase = new AutocompleteUseCase(searchIndex, cache);
   });
 
@@ -35,7 +41,11 @@ describe('AutocompleteUseCase', () => {
     const result = await useCase.execute({ prefix: '  LapTop ', limit: 5 });
 
     expect(searchIndex.autocomplete).toHaveBeenCalledWith('laptop', 5);
-    expect(cache.set).toHaveBeenCalledWith('autocomplete:5:laptop', result, expect.any(Number));
+    expect(cache.set).toHaveBeenCalledWith(
+      `autocomplete:v${SEARCH_SCHEMA_VERSION}:g0:5:laptop`,
+      result,
+      expect.any(Number),
+    );
     expect(result).toEqual(['Laptop', 'Laptop stand']);
   });
 

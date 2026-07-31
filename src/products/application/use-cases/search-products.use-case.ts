@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   PRODUCT_SEARCH_INDEX,
@@ -6,6 +7,8 @@ import {
 import { CACHE_PORT, CachePort } from '@/products/domain/ports/cache.port';
 import { ProductSearchCriteria } from '@/products/domain/search/search-criteria';
 import { ProductSearchResult } from '@/products/domain/search/search-result';
+import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
+import { GENERATION_KEY } from '@/products/application/cache-keys';
 
 /**
  * Orchestrates a product search. Elasticsearch owns relevance, faceting and
@@ -22,7 +25,7 @@ export class SearchProductsUseCase {
   ) {}
 
   async execute(criteria: ProductSearchCriteria): Promise<ProductSearchResult> {
-    const cacheKey = this.buildCacheKey(criteria);
+    const cacheKey = await this.buildCacheKey(criteria);
 
     const cached = await this.cache.get<ProductSearchResult>(cacheKey);
     if (cached) {
@@ -34,8 +37,14 @@ export class SearchProductsUseCase {
     return result;
   }
 
-  private buildCacheKey(criteria: ProductSearchCriteria): string {
-    // Stable key: sort object entries so filter order does not matter.
+  /**
+   * Key layout: search:v{schema}:g{generation}:{sha1 of criteria}. The schema
+   * version fences off stale shapes after a deploy, the generation is bumped
+   * by writes (instant invalidation) and the digest keeps keys short and
+   * bounded no matter how long the query text or filter lists are.
+   */
+  private async buildCacheKey(criteria: ProductSearchCriteria): Promise<string> {
+    // Stable digest: sort array entries so filter order does not matter.
     const normalized = {
       text: criteria.text?.trim().toLowerCase() ?? '',
       filters: {
@@ -43,12 +52,15 @@ export class SearchProductsUseCase {
         subcategories: [...(criteria.filters.subcategories ?? [])].sort(),
         locations: [...(criteria.filters.locations ?? [])].sort(),
         price: criteria.filters.price ?? {},
+        geo: criteria.filters.geo ?? null,
       },
       sort: criteria.sort,
       page: criteria.page,
       pageSize: criteria.pageSize,
     };
-    return `search:${JSON.stringify(normalized)}`;
+    const digest = createHash('sha1').update(JSON.stringify(normalized)).digest('hex');
+    const generation = (await this.cache.get<number>(GENERATION_KEY)) ?? 0;
+    return `search:v${SEARCH_SCHEMA_VERSION}:g${generation}:${digest}`;
   }
 
   /** Dates survive JSON as strings; restore them on cache hits. */

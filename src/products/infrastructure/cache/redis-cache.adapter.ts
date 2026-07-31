@@ -58,6 +58,15 @@ export class RedisCacheAdapter implements CachePort, OnModuleDestroy {
     }
   }
 
+  async incr(key: string): Promise<number | null> {
+    try {
+      return await this.client.incr(key);
+    } catch (error) {
+      this.logger.warn(`Cache incr failed for ${key}: ${this.message(error)}`);
+      return null;
+    }
+  }
+
   async onModuleDestroy(): Promise<void> {
     await this.client.quit();
   }
