@@ -45,4 +45,26 @@ describe('Product.create', () => {
     const original = props();
     expect(Product.create(original).toPrimitives()).toEqual(original);
   });
+
+  it('accepts valid coordinates', () => {
+    const product = Product.create(props({ coordinates: { lat: 40.4168, lon: -3.7038 } }));
+    expect(product.coordinates).toEqual({ lat: 40.4168, lon: -3.7038 });
+  });
+
+  it('accepts a product without coordinates', () => {
+    const product = Product.create(props());
+    expect(product.coordinates).toBeUndefined();
+  });
+
+  it.each([
+    { lat: 91, lon: 0 },
+    { lat: -91, lon: 0 },
+    { lat: 0, lon: 181 },
+    { lat: 0, lon: -181 },
+    { lat: Number.NaN, lon: 0 },
+  ])('rejects out of range coordinates %o', (coordinates) => {
+    expect(() => Product.create(props({ coordinates }))).toThrow(
+      'Product coordinates are out of range',
+    );
+  });
 });

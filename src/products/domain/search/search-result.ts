@@ -7,10 +7,20 @@ import { ProductProps } from '@/products/domain/product';
  */
 export type ProductView = ProductProps;
 
+/** Fragments of the matched fields with the query terms wrapped in em tags. */
+export interface HitHighlights {
+  name?: string;
+  description?: string;
+}
+
 export interface ProductSearchHit {
   product: ProductView;
   /** Relevance score assigned by the search engine for this query. */
   score: number;
+  /** Present only for text queries when the engine produced fragments. */
+  highlights?: HitHighlights;
+  /** Distance from the search origin, present only when sorting by distance. */
+  distanceKm?: number;
 }
 
 export interface FacetBucket {

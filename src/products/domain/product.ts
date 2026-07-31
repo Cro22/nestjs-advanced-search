@@ -1,3 +1,5 @@
+import { GeoPoint, isValidGeoPoint } from '@/products/domain/geo';
+
 export interface ProductProps {
   id: string;
   name: string;
@@ -5,6 +7,8 @@ export interface ProductProps {
   category: string;
   subcategories: string[];
   location: string;
+  /** Optional coordinates of the product location, used for geo search. */
+  coordinates?: GeoPoint;
   price: number;
   popularity: number;
   createdAt: Date;
@@ -21,6 +25,7 @@ export class Product {
   readonly category: string;
   readonly subcategories: string[];
   readonly location: string;
+  readonly coordinates?: GeoPoint;
   readonly price: number;
   readonly popularity: number;
   readonly createdAt: Date;
@@ -32,6 +37,7 @@ export class Product {
     this.category = props.category;
     this.subcategories = props.subcategories;
     this.location = props.location;
+    this.coordinates = props.coordinates;
     this.price = props.price;
     this.popularity = props.popularity;
     this.createdAt = props.createdAt;
@@ -43,6 +49,9 @@ export class Product {
     }
     if (props.price < 0) {
       throw new Error('Product price cannot be negative');
+    }
+    if (props.coordinates && !isValidGeoPoint(props.coordinates)) {
+      throw new Error('Product coordinates are out of range');
     }
     return new Product({
       ...props,
@@ -59,6 +68,7 @@ export class Product {
       category: this.category,
       subcategories: this.subcategories,
       location: this.location,
+      coordinates: this.coordinates,
       price: this.price,
       popularity: this.popularity,
       createdAt: this.createdAt,

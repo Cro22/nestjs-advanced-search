@@ -2,6 +2,7 @@ export enum SortField {
   RELEVANCE = 'relevance',
   POPULARITY = 'popularity',
   CREATED_AT = 'created_at',
+  DISTANCE = 'distance',
 }
 
 export enum SortDirection {
@@ -14,11 +15,23 @@ export interface PriceRange {
   max?: number;
 }
 
+/**
+ * Geographic origin of a search. When radiusKm is present it acts as a filter
+ * (only products within the radius match); without it the origin only serves
+ * as the reference point for distance sorting.
+ */
+export interface GeoFilter {
+  lat: number;
+  lon: number;
+  radiusKm?: number;
+}
+
 export interface ProductSearchFilters {
   categories?: string[];
   subcategories?: string[];
   locations?: string[];
   price?: PriceRange;
+  geo?: GeoFilter;
 }
 
 export interface ProductSort {

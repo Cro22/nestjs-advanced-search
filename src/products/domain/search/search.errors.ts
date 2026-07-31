@@ -9,3 +9,15 @@ export class SearchUnavailableError extends Error {
     this.name = 'SearchUnavailableError';
   }
 }
+
+/**
+ * Raised when the request itself is malformed (inconsistent geo parameters,
+ * pagination beyond the search window, a query the engine rejects). The HTTP
+ * layer maps it to a 400 so client mistakes are never reported as outages.
+ */
+export class InvalidSearchQueryError extends Error {
+  constructor(message = 'The search query is invalid') {
+    super(message);
+    this.name = 'InvalidSearchQueryError';
+  }
+}
