@@ -68,7 +68,13 @@ export class RedisCacheAdapter implements CachePort, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    await this.client.quit();
+    try {
+      await this.client.quit();
+    } catch {
+      // A connection that never established cannot QUIT; drop it instead so
+      // shutdown never hangs on a dead cache.
+      this.client.disconnect();
+    }
   }
 
   private message(error: unknown): string {
