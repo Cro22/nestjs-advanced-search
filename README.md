@@ -251,8 +251,11 @@ Query parameters:
 | `radiusKm`      | number            | Only match products within this radius. Requires `lat` and `lon`  |
 | `sort`          | enum              | `relevance`, `popularity`, `created_at` or `distance`. Defaults to relevance. `distance` requires `lat` and `lon` |
 | `order`         | enum              | `asc` or `desc`. Defaults to desc, except `distance` which defaults to nearest first |
-| `page`          | integer           | One based page number. Defaults to 1                              |
+| `page`          | integer           | One based page number for offset pagination. Defaults to 1        |
 | `pageSize`      | integer           | Page size, capped by `SEARCH_MAX_PAGE_SIZE`. Defaults to 20       |
+| `cursor`        | string            | Opaque token from a previous `meta.nextCursor`, for deep pagination past the offset window. Cannot be combined with `page` |
+
+Every response carries a `meta.nextCursor` token (null on the last page). Pass it back as `cursor` to page arbitrarily deep with `search_after`, past the 10000 result ceiling that offset pagination is capped at.
 
 Geo example:
 
@@ -418,20 +421,20 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 **Error handling.** A global exception filter turns any error into a consistent JSON envelope, and validation runs through a global pipe that rejects unknown fields.
 
-## Known tradeoffs and next steps
+## Design decisions
 
-These are deliberate choices for the scope of this challenge, called out so the boundaries are explicit rather than accidental.
+Each of these is a deliberate choice, spelled out so the reasoning is explicit rather than implicit. Where a choice is configurable, the knob is named.
 
-* **Write path consistency.** Writes hit Postgres first (with a transactional outbox entry) and then index synchronously for immediate searchability, with the outbox processor as the convergence guarantee. The remaining tradeoff is the per request `refresh: wait_for`, which trades write latency for read your writes semantics; a high throughput system would drop it and accept eventual consistency.
+* **Write path consistency.** Writes hit Postgres first (with a transactional outbox entry) and then index synchronously for immediate searchability, with the outbox processor as the convergence guarantee. The per request `refresh: wait_for` buys read your writes semantics at the cost of a little write latency, which is the right default for a catalogue where an editor expects to see their change immediately; a write heavy pipeline that can tolerate a short delay would drop it and let the outbox converge asynchronously.
 
-* **Reindex scope.** The bootstrap reindex is idempotent (it rebuilds only when the index count differs from Postgres or the schema version changed), rebuilds are invisible thanks to the alias swap, and drift in document content between equal counts is the only case that still needs a manual `npm run search:reindex`. A write racing a reindex that runs in a different process can land only in the outgoing index generation; the outbox processor reprojects it into the new one within one poll interval.
+* **Reindex convergence.** The bootstrap reindex is idempotent and self healing: it rebuilds only when the schema version changed, the document count differs from Postgres, or a content checksum stamped on the index no longer matches the data (so out of band edits that leave the count unchanged are detected and repaired without a manual command). Rebuilds are invisible thanks to the alias swap, and a write racing a reindex in another process is reprojected into the new generation by the outbox within one poll interval.
 
-* **Deep pagination.** Pagination uses `from` and `size` and the API rejects requests beyond the first 10000 results with a clear 400 instead of failing inside the engine. That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`, which was deliberately left out.
+* **Deep pagination.** Page based access uses `from` and `size` and is capped at the first 10000 results, the point past which offset paging degrades inside the engine. Beyond that the API returns a `meta.nextCursor` token on every response and accepts it as `cursor`, switching to `search_after` with a unique tiebreaker so a client can page through the entire result set at constant cost with no skips or repeats.
 
-* **Popularity signal.** Views feed popularity live through the view endpoint. Richer signals (clicks, purchases, decay over time) and batched increments would be the next steps for a production ranking pipeline.
+* **Popularity signal.** Views feed popularity live through the view endpoint, and the checksum that guards the reindex deliberately excludes it so the frequent view traffic never forces a rebuild. Richer signals (clicks, purchases, decay over time) and batched increments would be the natural extension for a production ranking pipeline.
 
-* **Rate limiting fails open.** Throttle counters are shared through Redis, and when Redis is unreachable the guard lets requests through rather than rejecting them all. That trades a brief window without protection for availability, which is the right default here; an API under active abuse would prefer to fail closed.
+* **Rate limiting failure mode.** Throttle counters are shared through Redis so limits hold across replicas. When Redis is unreachable the guard fails open by default, favouring availability over protection, and `THROTTLE_FAIL_OPEN=false` flips it to fail closed (a clean 503) for an API that would rather shed load than serve unmetered.
 
-* **Single node infrastructure.** The Docker stack runs single node Elasticsearch with security disabled and no Redis or Postgres authentication hardening, which is appropriate for local evaluation but not for production.
+* **Infrastructure hardening.** The base Docker stack runs with authentication off for a friction free local evaluation. The `docker-compose.hardened.yml` overlay turns security on across every service (Postgres and Redis passwords, Elasticsearch basic auth), and the application picks the credentials up through dedicated environment variables, so the same image runs against either stack.
 
-* **Dependency audit posture.** Every `npm audit` finding fixable without a breaking change has been applied. The remaining reports sit behind the NestJS 11 major (multer and qs inside `@nestjs/platform-express`, lodash inside `@nestjs/config` and `@nestjs/swagger`) plus dev only tooling (webpack, inquirer and tmp inside `@nestjs/cli`), none of which is reachable in this API: no endpoint accepts multipart uploads, so multer middleware is never registered, and the build tooling never runs in the production image. Upgrading the framework major is the clean path to a silent audit and is left as the next dependency step.
+* **Dependency hygiene.** `npm audit` reports zero vulnerabilities. The project runs on NestJS 11, and a scoped `overrides` entry pins the one transitive package (`js-yaml` under Swagger) whose upstream release still lagged.

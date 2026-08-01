@@ -14,6 +14,11 @@
       "key": "productId",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "nextCursor",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -129,6 +134,54 @@
           ]
         },
         "description": "Sort options are relevance, popularity and created_at. Pagination is one based and page size is capped by SEARCH_MAX_PAGE_SIZE."
+      }
+    },
+    {
+      "name": "Search :: deep pagination (cursor, page 1)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const cursor = pm.response.json().meta.nextCursor;",
+              "pm.collectionVariables.set('nextCursor', cursor || '');",
+              "pm.test('a cursor is returned for a full page', () => pm.expect(cursor).to.be.a('string'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?sort=popularity&pageSize=3",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "sort", "value": "popularity" },
+            { "key": "pageSize", "value": "3" }
+          ]
+        },
+        "description": "First page of a deep pagination walk. The test script saves meta.nextCursor into the nextCursor collection variable for the next request."
+      }
+    },
+    {
+      "name": "Search :: deep pagination (cursor, next page)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/products/search?sort=popularity&pageSize=3&cursor={{nextCursor}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["products", "search"],
+          "query": [
+            { "key": "sort", "value": "popularity" },
+            { "key": "pageSize", "value": "3" },
+            { "key": "cursor", "value": "{{nextCursor}}" }
+          ]
+        },
+        "description": "Resumes after the previous page using search_after. Run the page 1 request first so nextCursor is populated. Repeat this request to walk the whole result set; meta.nextCursor is null on the last page."
       }
     },
     {
