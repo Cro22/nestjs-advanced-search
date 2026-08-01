@@ -7,9 +7,12 @@ import { MetricsService } from '@/shared/infrastructure/metrics/metrics.service'
 export const REDIS_CLIENT = Symbol('REDIS_CLIENT');
 
 export function createRedisClient(config: ConfigService): Redis {
+  const password = config.get<string>('redis.password');
   return new Redis({
     host: config.get<string>('redis.host'),
     port: config.get<number>('redis.port'),
+    // Set only when Redis runs with requirepass; the open local stack omits it.
+    ...(password ? { password } : {}),
     lazyConnect: false,
     maxRetriesPerRequest: 2,
   });

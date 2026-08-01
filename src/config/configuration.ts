@@ -15,11 +15,14 @@ export interface AppConfig {
   elasticsearch: {
     node: string;
     index: string;
+    username?: string;
+    password?: string;
   };
   redis: {
     host: string;
     port: number;
     ttlSeconds: number;
+    password?: string;
   };
   search: {
     maxPageSize: number;
@@ -44,11 +47,16 @@ export default (): AppConfig => ({
   elasticsearch: {
     node: process.env.ELASTICSEARCH_NODE ?? 'http://localhost:9200',
     index: process.env.ELASTICSEARCH_PRODUCT_INDEX ?? 'products',
+    // Optional basic auth, used when the cluster runs with security enabled.
+    username: process.env.ELASTICSEARCH_USERNAME || undefined,
+    password: process.env.ELASTICSEARCH_PASSWORD || undefined,
   },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',
     port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
     ttlSeconds: parseInt(process.env.REDIS_TTL_SECONDS ?? '60', 10),
+    // Optional, used when Redis runs with requirepass.
+    password: process.env.REDIS_PASSWORD || undefined,
   },
   search: {
     maxPageSize: parseInt(process.env.SEARCH_MAX_PAGE_SIZE ?? '100', 10),

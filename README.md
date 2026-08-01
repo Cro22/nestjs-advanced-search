@@ -146,6 +146,16 @@ To stop and remove the stack together with its volumes:
 docker compose down -v
 ```
 
+### Hardened stack
+
+The base stack leaves authentication off so a reviewer can bring it up with zero friction. A production like overlay turns security on across every service (Postgres and Redis passwords, Elasticsearch basic auth):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build
+```
+
+The overlay reads its passwords from the environment with weak demo defaults, so set real values (`POSTGRES_PASSWORD`, `ELASTIC_PASSWORD`, `REDIS_PASSWORD`) before using it for anything beyond a local trial. The application picks the credentials up through `ELASTICSEARCH_USERNAME` / `ELASTICSEARCH_PASSWORD` and `REDIS_PASSWORD`, which stay unset for the open stack.
+
 ### Upgrading an existing volume
 
 A plain `docker compose up --build` migrates an already populated stack in place: `db push` adds the new nullable coordinate columns, the seed backfills coordinates for existing rows, and the boot reindex rebuilds the versioned index (`products_v2`) with the new mapping. `docker compose down -v` remains the clean slate path.
@@ -208,8 +218,11 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `DATABASE_URL`                 | see `.env.example`               | Postgres connection string                   |
 | `ELASTICSEARCH_NODE`           | `http://localhost:9200`          | Elasticsearch endpoint                       |
 | `ELASTICSEARCH_PRODUCT_INDEX`  | `products`                       | Index name                                   |
+| `ELASTICSEARCH_USERNAME`       | unset                            | Basic auth user (set when security is on)    |
+| `ELASTICSEARCH_PASSWORD`       | unset                            | Basic auth password                          |
 | `REDIS_HOST`                   | `localhost`                      | Redis host                                   |
 | `REDIS_PORT`                   | `6379`                           | Redis port                                   |
+| `REDIS_PASSWORD`               | unset                            | Redis password (set when requirepass is on)  |
 | `REDIS_TTL_SECONDS`            | `60`                             | Default cache time to live                   |
 | `SEARCH_MAX_PAGE_SIZE`         | `100`                            | Upper bound for the page size                |
 | `AUTOCOMPLETE_MAX_SUGGESTIONS` | `10`                             | Upper bound for autocomplete results         |

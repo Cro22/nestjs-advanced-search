@@ -1,0 +1,43 @@
+# Production like hardening overlay. Layer it on top of the base stack:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build
+#
+# It turns on authentication everywhere the base stack leaves open for a
+# friction free local evaluation: Postgres, Redis (requirepass) and
+# Elasticsearch (xpack security). The passwords below are interpolated from the
+# environment with weak demo defaults; set real ones in a .env file or the shell
+# before using this for anything beyond a local trial. HTTP TLS is intentionally
+# left off so the stack still runs with no certificates to manage; a real
+# deployment would terminate TLS in front of every service.
+services:
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-s3arch_pg_ChangeMe}
+
+  elasticsearch:
+    environment:
+      xpack.security.enabled: 'true'
+      xpack.security.http.ssl.enabled: 'false'
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-s3arch_es_ChangeMe}
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          "curl -sf -u elastic:${ELASTIC_PASSWORD:-s3arch_es_ChangeMe} 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=1s' || exit 1",
+        ]
+
+  redis:
+    command: ['redis-server', '--requirepass', '${REDIS_PASSWORD:-s3arch_redis_ChangeMe}']
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'redis-cli --no-auth-warning -a ${REDIS_PASSWORD:-s3arch_redis_ChangeMe} ping | grep -q PONG',
+        ]
+
+  api:
+    environment:
+      DATABASE_URL: postgresql://search:${POSTGRES_PASSWORD:-s3arch_pg_ChangeMe}@postgres:5432/search?schema=public
+      ELASTICSEARCH_USERNAME: elastic
+      ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:-s3arch_es_ChangeMe}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-s3arch_redis_ChangeMe}
