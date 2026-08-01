@@ -158,6 +158,37 @@ describe('GET /api/products/search (e2e)', () => {
     expect(res.body.message).toContain('limited to the first 10000 results');
   });
 
+  it('pages through the whole result set with the cursor, no gaps or repeats', async () => {
+    const first = await request(http)
+      .get('/api/products/search')
+      .query({ sort: 'popularity', pageSize: 3 })
+      .expect(200);
+    const total: number = first.body.meta.total;
+
+    const seen: string[] = first.body.data.map((hit: { id: string }) => hit.id);
+    let cursor: string | null = first.body.meta.nextCursor;
+    let guard = 0;
+    while (cursor && guard < 50) {
+      const res: request.Response = await request(http)
+        .get('/api/products/search')
+        .query({ sort: 'popularity', pageSize: 3, cursor })
+        .expect(200);
+      seen.push(...res.body.data.map((hit: { id: string }) => hit.id));
+      cursor = res.body.meta.nextCursor;
+      guard += 1;
+    }
+
+    // Every product surfaced exactly once and the walk terminated cleanly.
+    expect(cursor).toBeNull();
+    expect(seen).toHaveLength(total);
+    expect(new Set(seen).size).toBe(total);
+  });
+
+  it('rejects combining a cursor with an explicit page', async () => {
+    const cursor = Buffer.from(JSON.stringify([0, 'x']), 'utf8').toString('base64url');
+    await request(http).get('/api/products/search').query({ cursor, page: 2 }).expect(400);
+  });
+
   it('rejects a partial geo origin with a 400', async () => {
     const res = await request(http).get('/api/products/search').query({ lat: 40.4168 }).expect(400);
     expect(res.body.message).toContain('lat and lon must be provided together');

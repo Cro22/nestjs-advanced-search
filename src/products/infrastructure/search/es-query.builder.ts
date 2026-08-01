@@ -23,10 +23,7 @@ export class EsQueryBuilder {
   private static readonly FACET_SIZE = 50;
 
   static buildSearchBody(criteria: ProductSearchCriteria): EsClause {
-    const from = (criteria.page - 1) * criteria.pageSize;
-
     const body: EsClause = {
-      from,
       size: criteria.pageSize,
       track_total_hits: true,
       query: this.buildRelevanceQuery(criteria),
@@ -34,6 +31,15 @@ export class EsQueryBuilder {
       aggs: this.buildAggregations(criteria.filters),
       sort: this.buildSort(criteria),
     };
+
+    if (criteria.searchAfter) {
+      // Deep pagination: resume after the previous page's last hit. `from` must
+      // stay unset (Elasticsearch rejects search_after combined with a nonzero
+      // offset), so paging depth carries no max_result_window ceiling.
+      body.search_after = criteria.searchAfter;
+    } else {
+      body.from = (criteria.page - 1) * criteria.pageSize;
+    }
 
     const suggest = this.buildSuggest(criteria.text);
     if (suggest) {
@@ -230,6 +236,13 @@ export class EsQueryBuilder {
   // --- sort ----------------------------------------------------------------
 
   private static buildSort(criteria: ProductSearchCriteria): EsClause[] {
+    // A unique final tiebreaker (the keyword id) makes every ordering total, so
+    // search_after can page deep without ever skipping or repeating a hit on a
+    // tie. It is harmless for offset pagination.
+    return [...this.primarySort(criteria), { id: 'asc' }];
+  }
+
+  private static primarySort(criteria: ProductSearchCriteria): EsClause[] {
     const dir = criteria.sort.direction;
     switch (criteria.sort.field) {
       case SortField.POPULARITY:

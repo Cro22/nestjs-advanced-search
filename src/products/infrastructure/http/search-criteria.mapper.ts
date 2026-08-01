@@ -6,7 +6,12 @@ import {
   SortField,
 } from '@/products/domain/search/search-criteria';
 import { InvalidSearchQueryError } from '@/products/domain/search/search.errors';
-import { clampPageSize, MAX_SEARCH_WINDOW, normalizePage } from '@/shared/domain/pagination';
+import {
+  clampPageSize,
+  decodeCursor,
+  MAX_SEARCH_WINDOW,
+  normalizePage,
+} from '@/shared/domain/pagination';
 import { SearchProductsQueryDto } from '@/products/infrastructure/http/dto/search-products.query.dto';
 
 /** Directions that only make sense one way are normalized for a nicer API. */
@@ -62,9 +67,13 @@ export function toSearchCriteria(
 
   const page = normalizePage(dto.page);
   const pageSize = clampPageSize(dto.pageSize, maxPageSize);
-  if (page * pageSize > MAX_SEARCH_WINDOW) {
+
+  // Cursor pagination and page based pagination are mutually exclusive: mixing
+  // an offset with search_after is ambiguous, so it is rejected outright.
+  const searchAfter = resolveCursor(dto, page);
+  if (!searchAfter && page * pageSize > MAX_SEARCH_WINDOW) {
     throw new InvalidSearchQueryError(
-      `Pagination is limited to the first ${MAX_SEARCH_WINDOW} results. Narrow the query instead of paging deeper.`,
+      `Offset pagination is limited to the first ${MAX_SEARCH_WINDOW} results. Use the cursor from meta.nextCursor to page deeper.`,
     );
   }
 
@@ -80,5 +89,20 @@ export function toSearchCriteria(
     sort,
     page,
     pageSize,
+    ...(searchAfter ? { searchAfter } : {}),
   };
+}
+
+function resolveCursor(dto: SearchProductsQueryDto, page: number): unknown[] | undefined {
+  if (dto.cursor === undefined) {
+    return undefined;
+  }
+  if (page > 1) {
+    throw new InvalidSearchQueryError('cursor and page cannot be combined');
+  }
+  const decoded = decodeCursor(dto.cursor);
+  if (!decoded) {
+    throw new InvalidSearchQueryError('Malformed pagination cursor');
+  }
+  return decoded;
 }

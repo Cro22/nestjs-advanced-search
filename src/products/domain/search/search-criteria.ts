@@ -49,6 +49,12 @@ export interface ProductSearchCriteria {
   sort: ProductSort;
   page: number; // 1 based
   pageSize: number;
+  /**
+   * Sort tuple of the last hit of the previous page. When present the search
+   * resumes with Elasticsearch `search_after` (deep pagination) and the offset
+   * derived from `page` is ignored.
+   */
+  searchAfter?: unknown[];
 }
 
 export const DEFAULT_SORT: ProductSort = {

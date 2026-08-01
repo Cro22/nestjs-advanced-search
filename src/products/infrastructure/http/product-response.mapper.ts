@@ -28,6 +28,8 @@ export interface SearchResponse {
     page: number;
     pageSize: number;
     totalPages: number;
+    /** Cursor for the next page of deep pagination, or null on the last page. */
+    nextCursor: string | null;
   };
   facets: ProductSearchResult['facets'];
   suggestions: string[];
@@ -72,6 +74,7 @@ export function toSearchResponse(result: ProductSearchResult): SearchResponse {
       page: result.page,
       pageSize: result.pageSize,
       totalPages: Math.ceil(result.total / result.pageSize) || 0,
+      nextCursor: result.nextCursor,
     },
     facets: result.facets,
     suggestions: result.suggestions,

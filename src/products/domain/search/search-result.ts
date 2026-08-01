@@ -54,4 +54,9 @@ export interface ProductSearchResult {
   facets: ProductFacets;
   /** Alternative or related query terms (did you mean / related searches). */
   suggestions: string[];
+  /**
+   * Cursor to fetch the next page with deep pagination, or null when this is the
+   * last page. Present regardless of which pagination mode the request used.
+   */
+  nextCursor: string | null;
 }

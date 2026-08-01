@@ -142,23 +142,25 @@ describe('EsQueryBuilder.buildSearchBody', () => {
   });
 
   describe('sorting', () => {
+    // Every ordering ends with the unique id tiebreaker so search_after can page
+    // deep without skipping or repeating a hit.
     it('sorts by popularity with a score tie breaker', () => {
       const body = EsQueryBuilder.buildSearchBody(
         criteria({ sort: { field: SortField.POPULARITY, direction: SortDirection.DESC } }),
       );
-      expect(body.sort).toEqual([{ popularity: 'desc' }, { _score: 'desc' }]);
+      expect(body.sort).toEqual([{ popularity: 'desc' }, { _score: 'desc' }, { id: 'asc' }]);
     });
 
     it('sorts by createdAt honouring the requested direction', () => {
       const body = EsQueryBuilder.buildSearchBody(
         criteria({ sort: { field: SortField.CREATED_AT, direction: SortDirection.ASC } }),
       );
-      expect(body.sort).toEqual([{ createdAt: 'asc' }]);
+      expect(body.sort).toEqual([{ createdAt: 'asc' }, { id: 'asc' }]);
     });
 
     it('sorts by relevance with a popularity tie breaker', () => {
       const body = EsQueryBuilder.buildSearchBody(criteria());
-      expect(body.sort).toEqual([{ _score: 'desc' }, { popularity: 'desc' }]);
+      expect(body.sort).toEqual([{ _score: 'desc' }, { popularity: 'desc' }, { id: 'asc' }]);
     });
 
     it('sorts by geo distance from the origin with a score tie breaker', () => {
@@ -177,7 +179,25 @@ describe('EsQueryBuilder.buildSearchBody', () => {
           },
         },
         { _score: 'desc' },
+        { id: 'asc' },
       ]);
+    });
+  });
+
+  describe('pagination', () => {
+    it('uses from/size for offset pagination', () => {
+      const body = EsQueryBuilder.buildSearchBody(criteria({ page: 3, pageSize: 20 }));
+      expect(body.from).toBe(40);
+      expect(body.size).toBe(20);
+      expect(body.search_after).toBeUndefined();
+    });
+
+    it('switches to search_after and drops from when a cursor is present', () => {
+      const body = EsQueryBuilder.buildSearchBody(
+        criteria({ page: 1, pageSize: 20, searchAfter: [1.5, 'abc'] }),
+      );
+      expect(body.search_after).toEqual([1.5, 'abc']);
+      expect(body.from).toBeUndefined();
     });
   });
 

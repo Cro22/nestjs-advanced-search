@@ -29,6 +29,7 @@ function emptyResult(): ProductSearchResult {
     pageSize: 20,
     facets: { categories: [], subcategories: [], locations: [], price: null },
     suggestions: [],
+    nextCursor: null,
   };
 }
 

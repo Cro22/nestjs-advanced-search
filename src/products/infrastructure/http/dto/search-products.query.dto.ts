@@ -111,4 +111,12 @@ export class SearchProductsQueryDto {
   @IsInt()
   @Min(1)
   pageSize?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Opaque cursor from a previous response (meta.nextCursor) for deep pagination. Overrides page.',
+  })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
 }

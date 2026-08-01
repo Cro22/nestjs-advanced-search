@@ -57,6 +57,8 @@ export class SearchProductsUseCase {
       sort: criteria.sort,
       page: criteria.page,
       pageSize: criteria.pageSize,
+      // Different cursors are different pages, so they must key separately.
+      searchAfter: criteria.searchAfter ?? null,
     };
     const digest = createHash('sha1').update(JSON.stringify(normalized)).digest('hex');
     const generation = (await this.cache.get<number>(GENERATION_KEY)) ?? 0;

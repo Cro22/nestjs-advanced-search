@@ -97,9 +97,30 @@ describe('toSearchCriteria', () => {
       expect(map({ page: 100, pageSize: 100 }).page).toBe(100);
     });
 
-    it('rejects pages beyond the search window', () => {
+    it('rejects offset pages beyond the search window', () => {
       expect(() => map({ page: 501, pageSize: 20 })).toThrow(InvalidSearchQueryError);
       expect(() => map({ page: 101, pageSize: 100 })).toThrow(/limited to the first 10000 results/);
+    });
+  });
+
+  describe('cursor pagination', () => {
+    const cursor = Buffer.from(JSON.stringify([1.5, 'id-9']), 'utf8').toString('base64url');
+
+    it('decodes a valid cursor into the search_after tuple', () => {
+      expect(map({ cursor }).searchAfter).toEqual([1.5, 'id-9']);
+    });
+
+    it('bypasses the offset window guard when a cursor drives pagination', () => {
+      // A cursor pages arbitrarily deep, so the 10000 window must not apply.
+      expect(() => map({ cursor, pageSize: 100 })).not.toThrow();
+    });
+
+    it('rejects a malformed cursor', () => {
+      expect(() => map({ cursor: 'not-base64-json' })).toThrow(/Malformed pagination cursor/);
+    });
+
+    it('rejects combining a cursor with an explicit page', () => {
+      expect(() => map({ cursor, page: 2 })).toThrow(/cursor and page cannot be combined/);
     });
   });
 });

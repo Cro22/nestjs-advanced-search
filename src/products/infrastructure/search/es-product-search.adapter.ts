@@ -17,6 +17,7 @@ import {
   SearchUnavailableError,
 } from '@/products/domain/search/search.errors';
 import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
+import { encodeCursor } from '@/shared/domain/pagination';
 import { ELASTICSEARCH_CLIENT } from '@/products/infrastructure/search/elasticsearch.client';
 import { EsQueryBuilder } from '@/products/infrastructure/search/es-query.builder';
 import {
@@ -330,7 +331,21 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
         price: this.readPriceStats(aggregations),
       },
       suggestions: this.readSuggestions(suggest, criteria.text),
+      nextCursor: this.readNextCursor(response.hits.hits ?? [], criteria.pageSize),
     };
+  }
+
+  /**
+   * A full page implies there may be more, so it exposes the last hit's sort
+   * tuple as the next cursor; a short page is the end and returns null. The sort
+   * tuple always exists because every ordering carries an explicit sort.
+   */
+  private readNextCursor(rawHits: Array<{ sort?: unknown[] }>, pageSize: number): string | null {
+    if (rawHits.length < pageSize || rawHits.length === 0) {
+      return null;
+    }
+    const lastSort = rawHits.at(-1)?.sort;
+    return lastSort ? encodeCursor(lastSort) : null;
   }
 
   async autocomplete(prefix: string, limit: number): Promise<string[]> {
