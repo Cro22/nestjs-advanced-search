@@ -25,6 +25,7 @@ describe('ReindexProductsUseCase', () => {
   beforeEach(() => {
     repository = {
       count: jest.fn(),
+      contentChecksum: jest.fn().mockResolvedValue('abc'),
       findBatch: jest.fn(),
       save: jest.fn(),
       findById: jest.fn(),
@@ -33,6 +34,7 @@ describe('ReindexProductsUseCase', () => {
     searchIndex = {
       countDocuments: jest.fn(),
       isCurrentSchema: jest.fn().mockResolvedValue(true),
+      getContentChecksum: jest.fn().mockResolvedValue('abc'),
       startRebuild: jest.fn(),
       finishRebuild: jest.fn(),
       abortRebuild: jest.fn(),
@@ -56,6 +58,20 @@ describe('ReindexProductsUseCase', () => {
     expect(result).toEqual({ indexed: 500, skipped: true });
     expect(searchIndex.startRebuild).not.toHaveBeenCalled();
     expect(searchIndex.bulkIndex).not.toHaveBeenCalled();
+  });
+
+  it('rebuilds and restamps when counts match but the content checksum drifted', async () => {
+    repository.count.mockResolvedValue(500);
+    repository.contentChecksum.mockResolvedValue('fresh');
+    searchIndex.countDocuments.mockResolvedValue(500);
+    searchIndex.getContentChecksum.mockResolvedValue('stale');
+    repository.findBatch.mockResolvedValueOnce({ items: [makeProduct('1')], nextCursor: null });
+
+    const result = await useCase.execute();
+
+    expect(result.skipped).toBe(false);
+    expect(searchIndex.startRebuild).toHaveBeenCalledTimes(1);
+    expect(searchIndex.finishRebuild).toHaveBeenCalledWith('fresh');
   });
 
   it('rebuilds when counts match but the index is on an old schema', async () => {

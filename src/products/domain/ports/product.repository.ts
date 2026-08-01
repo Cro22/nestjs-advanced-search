@@ -20,6 +20,13 @@ export interface ProductRepository {
   incrementPopularity(id: string): Promise<Product | null>;
   count(): Promise<number>;
   /**
+   * Deterministic fingerprint of the indexed content across the whole table.
+   * The reindex uses it to detect content drift between Postgres and the search
+   * index when the document counts already match. The volatile popularity is
+   * excluded so live view events never register as drift.
+   */
+  contentChecksum(): Promise<string>;
+  /**
    * Keyset pagination over the whole table, used to stream products into the
    * search index during a full reindex without loading everything in memory.
    */

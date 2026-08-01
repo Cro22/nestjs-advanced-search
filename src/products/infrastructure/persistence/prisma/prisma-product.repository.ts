@@ -64,6 +64,26 @@ export class PrismaProductRepository implements ProductRepository {
     return this.prisma.product.count();
   }
 
+  async contentChecksum(): Promise<string> {
+    // Hash the indexed structural fields row by row, then fold the per row
+    // digests into one order independent md5. popularity is left out on purpose
+    // so the frequent view events never look like drift. Computed in Postgres so
+    // the whole table never travels into the process.
+    const rows = await this.prisma.$queryRaw<{ checksum: string }[]>`
+      SELECT md5(coalesce(string_agg(sig, ',' ORDER BY sig), '')) AS checksum
+      FROM (
+        SELECT md5(
+          id::text || '|' || name || '|' || description || '|' || category || '|' ||
+          array_to_string(subcategories, ',') || '|' || location || '|' ||
+          coalesce(latitude::text, '') || '|' || coalesce(longitude::text, '') || '|' ||
+          price::text || '|' || extract(epoch from created_at)::text
+        ) AS sig
+        FROM products
+      ) signatures
+    `;
+    return rows[0]?.checksum ?? '';
+  }
+
   async findBatch(cursor: string | null, limit: number): Promise<ProductPage> {
     const rows = await this.prisma.product.findMany({
       take: limit,

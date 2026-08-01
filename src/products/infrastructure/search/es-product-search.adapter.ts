@@ -112,11 +112,21 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
     this.logger.log(`Staging rebuild into "${this.stagingIndex}"`);
   }
 
-  async finishRebuild(): Promise<void> {
+  async finishRebuild(checksum?: string): Promise<void> {
     if (!this.stagingIndex) {
       throw new Error('finishRebuild called without startRebuild');
     }
     const staging = this.stagingIndex;
+
+    // Stamp the freshly built index with the content checksum before the swap,
+    // so the atomic alias move exposes both the data and its fingerprint at once
+    // and a later boot can tell whether the projection still matches Postgres.
+    if (checksum !== undefined) {
+      await this.client.indices.putMapping({
+        index: staging,
+        _meta: { contentChecksum: checksum },
+      } as unknown as estypes.IndicesPutMappingRequest);
+    }
 
     // A leftover concrete index on the alias name would make the alias add
     // fail; clear it before the swap (same legacy case as ensureIndex).
@@ -170,6 +180,22 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
       return Object.keys(resolved).some((name) => name.startsWith(`${this.physicalPrefix}_`));
     } catch {
       return false;
+    }
+  }
+
+  async getContentChecksum(): Promise<string | null> {
+    try {
+      const aliasExists = await this.client.indices.existsAlias({ name: this.aliasName });
+      if (!aliasExists) {
+        return null;
+      }
+      const mapping = await this.client.indices.getMapping({ index: this.aliasName });
+      // Keyed by the physical index behind the alias; read the one _meta stamp.
+      const meta = Object.values(mapping)[0]?.mappings?._meta as
+        { contentChecksum?: string } | undefined;
+      return meta?.contentChecksum ?? null;
+    } catch {
+      return null;
     }
   }
 

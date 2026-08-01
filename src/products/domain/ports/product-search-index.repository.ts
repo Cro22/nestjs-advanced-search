@@ -14,14 +14,22 @@ export interface ProductSearchIndex {
    * Zero downtime rebuild protocol. startRebuild creates a fresh staging
    * index; subsequent bulkIndex calls fill it while the live index keeps
    * serving; finishRebuild atomically points reads at the staging index and
-   * discards the previous one. abortRebuild throws the staging index away.
+   * discards the previous one, stamping it with the content checksum so a later
+   * boot can tell whether the projection still matches Postgres. abortRebuild
+   * throws the staging index away.
    */
   startRebuild(): Promise<void>;
-  finishRebuild(): Promise<void>;
+  finishRebuild(checksum?: string): Promise<void>;
   abortRebuild(): Promise<void>;
 
   /** Whether the live index was built with the current schema version. */
   isCurrentSchema(): Promise<boolean>;
+
+  /**
+   * Content checksum stamped on the live index at its last rebuild, or null
+   * when the index does not exist or predates checksum stamping.
+   */
+  getContentChecksum(): Promise<string | null>;
 
   /** Number of documents currently in the live index (0 if it does not exist). */
   countDocuments(): Promise<number>;

@@ -22,9 +22,10 @@ export interface ReindexOptions {
  * the end. A failure aborts the staging index and leaves the live one intact.
  *
  * The operation is idempotent: unless forced, it skips the rebuild when the
- * live index is on the current schema and already holds the same number of
- * documents as Postgres, so restarting the container does not tear down a
- * healthy index.
+ * live index is on the current schema, holds the same number of documents as
+ * Postgres and carries the same content checksum, so restarting the container
+ * does not tear down a healthy index. When the checksum differs (content drift
+ * with an unchanged count) it rebuilds instead of needing a manual reindex.
  */
 @Injectable()
 export class ReindexProductsUseCase {
@@ -38,11 +39,13 @@ export class ReindexProductsUseCase {
 
   async execute(options: ReindexOptions = {}): Promise<ReindexResult> {
     const total = await this.repository.count();
+    const checksum = await this.repository.contentChecksum();
 
     if (!options.force) {
       const currentSchema = await this.searchIndex.isCurrentSchema();
       const indexedNow = await this.searchIndex.countDocuments();
-      if (currentSchema && total > 0 && indexedNow === total) {
+      const storedChecksum = await this.searchIndex.getContentChecksum();
+      if (currentSchema && total > 0 && indexedNow === total && storedChecksum === checksum) {
         this.logger.log(`Index already in sync (${total} products), skipping reindex.`);
         return { indexed: total, skipped: true };
       }
@@ -65,7 +68,7 @@ export class ReindexProductsUseCase {
         cursor = page.nextCursor;
       } while (cursor !== null);
 
-      await this.searchIndex.finishRebuild();
+      await this.searchIndex.finishRebuild(checksum);
     } catch (error) {
       // The live index never saw the partial rebuild; throw the staging away.
       await this.searchIndex.abortRebuild();

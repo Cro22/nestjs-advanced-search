@@ -92,6 +92,8 @@ describe('EsProductSearchAdapter', () => {
           exists: jest.fn().mockResolvedValue(false),
           existsAlias: jest.fn().mockResolvedValue(true),
           getAlias: jest.fn(),
+          getMapping: jest.fn(),
+          putMapping: jest.fn().mockResolvedValue({}),
           get: jest.fn().mockResolvedValue({}),
           updateAliases: jest.fn().mockResolvedValue({}),
           putAlias: jest.fn().mockResolvedValue({}),
@@ -153,6 +155,37 @@ describe('EsProductSearchAdapter', () => {
         Record<string, { _index: string }>
       >;
       expect(operations[0].index._index).toBe('products');
+    });
+
+    it('stamps the content checksum on the staging index before the swap', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+
+      await adapter.startRebuild();
+      const staging = client.indices.create.mock.calls[0][0].index as string;
+      await adapter.finishRebuild('checksum-123');
+
+      expect(client.indices.putMapping).toHaveBeenCalledWith({
+        index: staging,
+        _meta: { contentChecksum: 'checksum-123' },
+      });
+    });
+
+    it('reads the stored checksum from the live index _meta', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+      client.indices.getMapping.mockResolvedValue({
+        [`products_v${SEARCH_SCHEMA_VERSION}_123`]: {
+          mappings: { _meta: { contentChecksum: 'stored-xyz' } },
+        },
+      });
+
+      await expect(adapter.getContentChecksum()).resolves.toBe('stored-xyz');
+    });
+
+    it('returns a null checksum when the alias does not exist', async () => {
+      const { client, adapter } = buildRebuildAdapter();
+      client.indices.existsAlias.mockResolvedValue(false);
+
+      await expect(adapter.getContentChecksum()).resolves.toBeNull();
     });
 
     it('abortRebuild deletes the staging index and resets state', async () => {
