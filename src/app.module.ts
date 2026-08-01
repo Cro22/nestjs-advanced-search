@@ -60,6 +60,7 @@ import { ResilientThrottlerStorage } from '@/shared/infrastructure/http/resilien
         storage: new ResilientThrottlerStorage(
           new ThrottlerStorageRedisService(redis),
           config.get<string>('throttle.keyPrefix', ''),
+          config.get<boolean>('throttle.failOpen', true),
         ),
       }),
     }),

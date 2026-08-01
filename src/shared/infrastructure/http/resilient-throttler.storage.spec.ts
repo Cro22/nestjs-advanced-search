@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { ThrottlerStorage } from '@nestjs/throttler';
 import { ResilientThrottlerStorage } from '@/shared/infrastructure/http/resilient-throttler.storage';
 
@@ -23,7 +24,7 @@ describe('ResilientThrottlerStorage', () => {
     expect(inner.increment).toHaveBeenCalledWith('test:abc:key', 60, 120, 0, 'default');
   });
 
-  it('fails open when the inner storage rejects', async () => {
+  it('fails open by default when the inner storage rejects', async () => {
     const inner: ThrottlerStorage = {
       increment: jest.fn().mockRejectedValue(new Error('redis down')),
     };
@@ -34,5 +35,16 @@ describe('ResilientThrottlerStorage', () => {
     expect(result.isBlocked).toBe(false);
     expect(result.totalHits).toBe(1);
     expect(result.timeToExpire).toBe(60);
+  });
+
+  it('fails closed with a 503 when configured not to fail open', async () => {
+    const inner: ThrottlerStorage = {
+      increment: jest.fn().mockRejectedValue(new Error('redis down')),
+    };
+    const storage = new ResilientThrottlerStorage(inner, '', false);
+
+    await expect(storage.increment('key', 60, 120, 0, 'default')).rejects.toThrow(
+      ServiceUnavailableException,
+    );
   });
 });

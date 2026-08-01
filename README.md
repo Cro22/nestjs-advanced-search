@@ -201,6 +201,7 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `THROTTLE_TTL_MS`              | `60000`                          | Rate limit window in milliseconds            |
 | `THROTTLE_LIMIT`               | `120`                            | Requests allowed per window and client       |
 | `THROTTLE_KEY_PREFIX`          | `` (empty)                       | Namespaces throttle counters in a shared Redis|
+| `THROTTLE_FAIL_OPEN`           | `true`                           | Allow (true) or refuse (false) when Redis is down|
 | `THROTTLE_AUTOCOMPLETE_TTL_MS` | `10000`                          | Autocomplete rate limit window               |
 | `THROTTLE_AUTOCOMPLETE_LIMIT`  | `30`                             | Autocomplete requests per window and client  |
 | `OUTBOX_POLL_MS`               | `5000`                           | Interval of the outbox processor             |
@@ -414,9 +415,9 @@ These are deliberate choices for the scope of this challenge, called out so the 
 
 * **Deep pagination.** Pagination uses `from` and `size` and the API rejects requests beyond the first 10000 results with a clear 400 instead of failing inside the engine. That is well beyond a realistic browse depth for this API, but a catalogue that needs to page arbitrarily deep would switch to `search_after`, which was deliberately left out.
 
-* **Rate limiting fails open.** Throttle counters are shared through Redis, and when Redis is unreachable the guard lets requests through rather than rejecting them all. That trades a brief window without protection for availability, which is the right default here; an API under active abuse would prefer to fail closed.
-
 * **Popularity signal.** Views feed popularity live through the view endpoint. Richer signals (clicks, purchases, decay over time) and batched increments would be the next steps for a production ranking pipeline.
+
+* **Rate limiting fails open.** Throttle counters are shared through Redis, and when Redis is unreachable the guard lets requests through rather than rejecting them all. That trades a brief window without protection for availability, which is the right default here; an API under active abuse would prefer to fail closed.
 
 * **Single node infrastructure.** The Docker stack runs single node Elasticsearch with security disabled and no Redis or Postgres authentication hardening, which is appropriate for local evaluation but not for production.
 

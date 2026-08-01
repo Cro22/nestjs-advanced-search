@@ -7,6 +7,7 @@ export interface AppConfig {
     ttlMs: number;
     limit: number;
     keyPrefix: string;
+    failOpen: boolean;
   };
   outbox: {
     pollMs: number;
@@ -35,6 +36,7 @@ export default (): AppConfig => ({
     ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '120', 10),
     keyPrefix: process.env.THROTTLE_KEY_PREFIX ?? '',
+    failOpen: (process.env.THROTTLE_FAIL_OPEN ?? 'true') !== 'false',
   },
   outbox: {
     pollMs: parseInt(process.env.OUTBOX_POLL_MS ?? '5000', 10),
