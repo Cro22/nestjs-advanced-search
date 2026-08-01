@@ -57,7 +57,10 @@ import { ResilientThrottlerStorage } from '@/shared/infrastructure/http/resilien
         ],
         // Counters live in Redis so limits hold across replicas; the wrapper
         // fails open when Redis is down instead of erroring every request.
-        storage: new ResilientThrottlerStorage(new ThrottlerStorageRedisService(redis)),
+        storage: new ResilientThrottlerStorage(
+          new ThrottlerStorageRedisService(redis),
+          config.get<string>('throttle.keyPrefix', ''),
+        ),
       }),
     }),
     MetricsModule,

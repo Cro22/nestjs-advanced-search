@@ -200,6 +200,7 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `LOG_LEVEL`                    | `info`                           | pino log level                               |
 | `THROTTLE_TTL_MS`              | `60000`                          | Rate limit window in milliseconds            |
 | `THROTTLE_LIMIT`               | `120`                            | Requests allowed per window and client       |
+| `THROTTLE_KEY_PREFIX`          | `` (empty)                       | Namespaces throttle counters in a shared Redis|
 | `THROTTLE_AUTOCOMPLETE_TTL_MS` | `10000`                          | Autocomplete rate limit window               |
 | `THROTTLE_AUTOCOMPLETE_LIMIT`  | `30`                             | Autocomplete requests per window and client  |
 | `OUTBOX_POLL_MS`               | `5000`                           | Interval of the outbox processor             |

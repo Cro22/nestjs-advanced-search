@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -13,8 +14,13 @@ import { configureApp } from '@/app.setup';
 export async function createTestApp(
   envOverrides: Record<string, string> = {},
 ): Promise<INestApplication> {
+  // Every test app namespaces its throttle counters so suites sharing the one
+  // Redis container never inherit each other's rate limit budgets. A caller can
+  // still pin THROTTLE_KEY_PREFIX explicitly to observe shared behaviour.
+  const overrides = { THROTTLE_KEY_PREFIX: `test:${randomUUID()}`, ...envOverrides };
+
   const previous = new Map<string, string | undefined>();
-  for (const [key, value] of Object.entries(envOverrides)) {
+  for (const [key, value] of Object.entries(overrides)) {
     previous.set(key, process.env[key]);
     process.env[key] = value;
   }

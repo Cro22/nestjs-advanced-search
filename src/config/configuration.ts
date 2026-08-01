@@ -6,6 +6,7 @@ export interface AppConfig {
   throttle: {
     ttlMs: number;
     limit: number;
+    keyPrefix: string;
   };
   outbox: {
     pollMs: number;
@@ -33,6 +34,7 @@ export default (): AppConfig => ({
   throttle: {
     ttlMs: parseInt(process.env.THROTTLE_TTL_MS ?? '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '120', 10),
+    keyPrefix: process.env.THROTTLE_KEY_PREFIX ?? '',
   },
   outbox: {
     pollMs: parseInt(process.env.OUTBOX_POLL_MS ?? '5000', 10),

@@ -10,7 +10,15 @@ import { ThrottlerStorageRecord } from '@nestjs/throttler/dist/throttler-storage
 export class ResilientThrottlerStorage implements ThrottlerStorage {
   private readonly logger = new Logger(ResilientThrottlerStorage.name);
 
-  constructor(private readonly inner: ThrottlerStorage) {}
+  /**
+   * `keyPrefix` namespaces the counters in Redis. It is empty in production,
+   * where one deployment owns its budgets, and set per environment when a
+   * Redis instance is shared so counters never bleed across them.
+   */
+  constructor(
+    private readonly inner: ThrottlerStorage,
+    private readonly keyPrefix = '',
+  ) {}
 
   async increment(
     key: string,
@@ -19,8 +27,9 @@ export class ResilientThrottlerStorage implements ThrottlerStorage {
     blockDuration: number,
     throttlerName: string,
   ): Promise<ThrottlerStorageRecord> {
+    const namespacedKey = this.keyPrefix ? `${this.keyPrefix}:${key}` : key;
     try {
-      return await this.inner.increment(key, ttl, limit, blockDuration, throttlerName);
+      return await this.inner.increment(namespacedKey, ttl, limit, blockDuration, throttlerName);
     } catch (error) {
       this.logger.warn(
         `Throttler storage unavailable, letting the request through: ${

@@ -14,6 +14,15 @@ describe('ResilientThrottlerStorage', () => {
     expect(inner.increment).toHaveBeenCalledWith('key', 60, 120, 0, 'default');
   });
 
+  it('namespaces the key with the configured prefix', async () => {
+    const inner: ThrottlerStorage = { increment: jest.fn().mockResolvedValue(record) };
+    const storage = new ResilientThrottlerStorage(inner, 'test:abc');
+
+    await storage.increment('key', 60, 120, 0, 'default');
+
+    expect(inner.increment).toHaveBeenCalledWith('test:abc:key', 60, 120, 0, 'default');
+  });
+
   it('fails open when the inner storage rejects', async () => {
     const inner: ThrottlerStorage = {
       increment: jest.fn().mockRejectedValue(new Error('redis down')),
