@@ -223,6 +223,12 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `THROTTLE_AUTOCOMPLETE_TTL_MS` | `10000`                          | Autocomplete rate limit window               |
 | `THROTTLE_AUTOCOMPLETE_LIMIT`  | `30`                             | Autocomplete requests per window and client  |
 | `OUTBOX_POLL_MS`               | `5000`                           | Interval of the outbox processor             |
+| `OUTBOX_BATCH_SIZE`            | `100`                            | Entries claimed per poll                     |
+| `OUTBOX_MAX_ATTEMPTS`          | `10`                             | Attempts before an entry is dead-lettered    |
+| `OUTBOX_BACKOFF_BASE_MS`       | `1000`                           | Base delay for the exponential retry backoff |
+| `OUTBOX_BACKOFF_MAX_MS`        | `60000`                          | Cap on the retry backoff delay               |
+| `OUTBOX_LOCK_MS`               | `60000`                          | Lock horizon on a claimed entry (retried if a worker dies mid-flight) |
+| `OUTBOX_RETENTION_MS`          | `604800000`                      | Age after which processed entries are purged (default 7 days) |
 | `DATABASE_URL`                 | see `.env.example`               | Postgres connection string                   |
 | `ELASTICSEARCH_NODE`           | `http://localhost:9200`          | Elasticsearch endpoint                       |
 | `ELASTICSEARCH_PRODUCT_INDEX`  | `products`                       | Index name                                   |
@@ -427,6 +433,8 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 **Zero downtime reindexing.** Reads go through a stable alias while every rebuild streams into a fresh physical index named `{alias}_v{schema}_{timestamp}`. When the rebuild finishes, one atomic alias action makes the new generation visible and the old physicals are cleaned up; a failed rebuild is simply discarded, leaving the live index untouched. The schema version embedded in the physical name lets the boot reindex detect a mapping change and rebuild automatically, with no entrypoint changes and no manual steps.
 
 **Transactional outbox.** Every product mutation writes an outbox entry in the same Postgres transaction. The request path still indexes synchronously (so writes are searchable on the next request), and a background processor replays pending entries against the index, which turns an Elasticsearch outage at write time into a short delay instead of silent drift. Replaying an already projected write is an idempotent upsert.
+
+The processor is safe to run on every replica. It claims a batch with `SELECT … FOR UPDATE SKIP LOCKED`, so two workers never grab the same entry, and stamps a lock horizon on each claimed row that makes it eligible again if the worker dies mid-flight. Failures back off exponentially; an entry that exhausts `OUTBOX_MAX_ATTEMPTS` is dead-lettered (`failed_at` set, surfaced as the `outbox_dead_lettered_entries` metric) instead of retrying forever, and processed entries are purged past their retention window so the table stays small.
 
 **Live popularity.** `POST /products/:id/view` atomically increments the popularity that the `function_score` blends into relevance and that `sort=popularity` ranks by. View events deliberately do not flush the search cache: a ranking nudge does not justify invalidating every cached page, and the short TTL bounds the staleness.
 

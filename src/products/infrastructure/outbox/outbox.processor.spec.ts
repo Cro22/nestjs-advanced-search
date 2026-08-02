@@ -19,13 +19,16 @@ const productRow = {
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
 };
 
-function entry(id: string, operation: string, productId = 'p1') {
-  return { id, productId, operation, attempts: 0, createdAt: new Date(), processedAt: null };
+/** A row as it comes back from claimBatch: attempts already incremented. */
+function claimed(id: string, operation: string, attempts = 1, productId = 'p1') {
+  return { id, productId, operation, attempts };
 }
 
 describe('OutboxProcessor', () => {
   let prisma: {
-    outboxEntry: { findMany: jest.Mock; update: jest.Mock };
+    $queryRaw: jest.Mock;
+    $executeRaw: jest.Mock;
+    outboxEntry: { update: jest.Mock; count: jest.Mock };
     product: { findUnique: jest.Mock };
   };
   let searchIndex: jest.Mocked<ProductSearchIndex>;
@@ -33,19 +36,24 @@ describe('OutboxProcessor', () => {
 
   beforeEach(() => {
     prisma = {
-      outboxEntry: { findMany: jest.fn(), update: jest.fn() },
+      $queryRaw: jest.fn(),
+      $executeRaw: jest.fn().mockResolvedValue(0),
+      outboxEntry: { update: jest.fn(), count: jest.fn().mockResolvedValue(0) },
       product: { findUnique: jest.fn().mockResolvedValue(productRow) },
     };
     searchIndex = {
       index: jest.fn(),
       remove: jest.fn(),
     } as unknown as jest.Mocked<ProductSearchIndex>;
-    const config = { get: jest.fn().mockReturnValue(5000) } as unknown as ConfigService;
+    // Return each config value's own default (the second argument).
+    const config = {
+      get: jest.fn((_key: string, def: unknown) => def),
+    } as unknown as ConfigService;
     processor = new OutboxProcessor(prisma as unknown as PrismaService, searchIndex, config);
   });
 
   it('reindexes upsert entries from the source of truth and marks them processed', async () => {
-    prisma.outboxEntry.findMany.mockResolvedValue([entry('o1', OUTBOX_UPSERT)]);
+    prisma.$queryRaw.mockResolvedValue([claimed('o1', OUTBOX_UPSERT)]);
 
     const processed = await processor.drain();
 
@@ -55,13 +63,13 @@ describe('OutboxProcessor', () => {
     expect(prisma.outboxEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'o1' },
-        data: expect.objectContaining({ processedAt: expect.any(Date) }),
+        data: expect.objectContaining({ processedAt: expect.any(Date), nextRetryAt: null }),
       }),
     );
   });
 
   it('removes documents for delete entries', async () => {
-    prisma.outboxEntry.findMany.mockResolvedValue([entry('o1', OUTBOX_DELETE)]);
+    prisma.$queryRaw.mockResolvedValue([claimed('o1', OUTBOX_DELETE)]);
 
     await processor.drain();
 
@@ -70,7 +78,7 @@ describe('OutboxProcessor', () => {
   });
 
   it('marks an upsert processed when the product no longer exists', async () => {
-    prisma.outboxEntry.findMany.mockResolvedValue([entry('o1', OUTBOX_UPSERT)]);
+    prisma.$queryRaw.mockResolvedValue([claimed('o1', OUTBOX_UPSERT)]);
     prisma.product.findUnique.mockResolvedValue(null);
 
     const processed = await processor.drain();
@@ -79,29 +87,43 @@ describe('OutboxProcessor', () => {
     expect(searchIndex.index).not.toHaveBeenCalled();
   });
 
-  it('keeps a failing entry pending and increments its attempts', async () => {
-    prisma.outboxEntry.findMany.mockResolvedValue([
-      entry('o1', OUTBOX_UPSERT),
-      entry('o2', OUTBOX_DELETE, 'p2'),
+  it('backs off a failing entry instead of dead-lettering it while attempts remain', async () => {
+    prisma.$queryRaw.mockResolvedValue([
+      claimed('o1', OUTBOX_UPSERT),
+      claimed('o2', OUTBOX_DELETE, 1, 'p2'),
     ]);
     searchIndex.index.mockRejectedValue(new Error('es down'));
 
     const processed = await processor.drain();
 
-    // The failed upsert stays pending; the delete still goes through.
+    // The failed upsert is rescheduled; the delete still goes through.
     expect(processed).toBe(1);
-    expect(prisma.outboxEntry.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'o1' },
-        data: { attempts: { increment: 1 } },
-      }),
-    );
     expect(searchIndex.remove).toHaveBeenCalledWith('p2');
+
+    const o1Update = prisma.outboxEntry.update.mock.calls.find((c) => c[0].where.id === 'o1');
+    expect(o1Update?.[0].data).toEqual(
+      expect.objectContaining({ nextRetryAt: expect.any(Date), lastError: 'es down' }),
+    );
+    expect(o1Update?.[0].data.failedAt).toBeUndefined();
+  });
+
+  it('dead-letters an entry once it exhausts its attempts', async () => {
+    // attempts already at the default max (10) after the claim increment.
+    prisma.$queryRaw.mockResolvedValue([claimed('o1', OUTBOX_UPSERT, 10)]);
+    searchIndex.index.mockRejectedValue(new Error('still down'));
+
+    const processed = await processor.drain();
+
+    expect(processed).toBe(0);
+    const o1Update = prisma.outboxEntry.update.mock.calls.find((c) => c[0].where.id === 'o1');
+    expect(o1Update?.[0].data).toEqual(
+      expect.objectContaining({ failedAt: expect.any(Date), lastError: 'still down' }),
+    );
   });
 
   it('never lets the poll run concurrently with itself', async () => {
     let release: () => void = () => undefined;
-    prisma.outboxEntry.findMany.mockImplementation(
+    prisma.$queryRaw.mockImplementation(
       () => new Promise((resolve) => (release = () => resolve([]))),
     );
 

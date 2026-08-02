@@ -11,6 +11,12 @@ export interface AppConfig {
   };
   outbox: {
     pollMs: number;
+    batchSize: number;
+    maxAttempts: number;
+    backoffBaseMs: number;
+    backoffMaxMs: number;
+    lockMs: number;
+    retentionMs: number;
   };
   elasticsearch: {
     node: string;
@@ -75,6 +81,12 @@ export default (): AppConfig => ({
   },
   outbox: {
     pollMs: parseInt(process.env.OUTBOX_POLL_MS ?? '5000', 10),
+    batchSize: parseInt(process.env.OUTBOX_BATCH_SIZE ?? '100', 10),
+    maxAttempts: parseInt(process.env.OUTBOX_MAX_ATTEMPTS ?? '10', 10),
+    backoffBaseMs: parseInt(process.env.OUTBOX_BACKOFF_BASE_MS ?? '1000', 10),
+    backoffMaxMs: parseInt(process.env.OUTBOX_BACKOFF_MAX_MS ?? '60000', 10),
+    lockMs: parseInt(process.env.OUTBOX_LOCK_MS ?? '60000', 10),
+    retentionMs: parseInt(process.env.OUTBOX_RETENTION_MS ?? '604800000', 10),
   },
   elasticsearch: {
     node: process.env.ELASTICSEARCH_NODE ?? 'http://localhost:9200',

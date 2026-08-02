@@ -44,7 +44,15 @@ model OutboxEntry {
   attempts    Int       @default(0)
   createdAt   DateTime  @default(now()) @map("created_at")
   processedAt DateTime? @map("processed_at")
+  /// When the entry is eligible for processing again. A worker sets it to a short
+  /// lock horizon on claim (so a crashed worker's rows are retried) and to a
+  /// backoff delay on failure. Null means "eligible now".
+  nextRetryAt DateTime? @map("next_retry_at")
+  /// Set once the entry exhausts its retries: a dead letter needing attention.
+  failedAt    DateTime? @map("failed_at")
+  /// The last failure message, kept to make dead letters diagnosable.
+  lastError   String?   @map("last_error")
 
-  @@index([processedAt, createdAt])
+  @@index([processedAt, failedAt, nextRetryAt, createdAt])
   @@map("outbox_entries")
 }

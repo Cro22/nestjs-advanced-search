@@ -20,6 +20,12 @@ export const envValidationSchema = Joi.object({
   THROTTLE_AUTOCOMPLETE_LIMIT: Joi.number().default(30),
 
   OUTBOX_POLL_MS: Joi.number().default(5000),
+  OUTBOX_BATCH_SIZE: Joi.number().default(100),
+  OUTBOX_MAX_ATTEMPTS: Joi.number().default(10),
+  OUTBOX_BACKOFF_BASE_MS: Joi.number().default(1000),
+  OUTBOX_BACKOFF_MAX_MS: Joi.number().default(60000),
+  OUTBOX_LOCK_MS: Joi.number().default(60000),
+  OUTBOX_RETENTION_MS: Joi.number().default(604800000),
 
   DATABASE_URL: Joi.string().required(),
 
