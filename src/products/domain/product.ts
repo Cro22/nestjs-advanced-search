@@ -40,12 +40,14 @@ export class Product {
     this.name = props.name;
     this.description = props.description;
     this.category = props.category;
-    this.subcategories = props.subcategories;
+    // Copy the reference types on the way in so a caller that keeps and mutates
+    // the source array/object cannot reach into the aggregate's state.
+    this.subcategories = [...props.subcategories];
     this.location = props.location;
-    this.coordinates = props.coordinates;
+    this.coordinates = props.coordinates ? { ...props.coordinates } : undefined;
     this.price = props.price;
     this.popularity = props.popularity;
-    this.createdAt = props.createdAt;
+    this.createdAt = new Date(props.createdAt);
   }
 
   static create(props: ProductProps): Product {
@@ -66,17 +68,19 @@ export class Product {
   }
 
   toPrimitives(): ProductProps {
+    // Copy the reference types on the way out too, so the returned snapshot can
+    // never be used to mutate the aggregate.
     return {
       id: this.id,
       name: this.name,
       description: this.description,
       category: this.category,
-      subcategories: this.subcategories,
+      subcategories: [...this.subcategories],
       location: this.location,
-      coordinates: this.coordinates,
+      coordinates: this.coordinates ? { ...this.coordinates } : undefined,
       price: this.price,
       popularity: this.popularity,
-      createdAt: this.createdAt,
+      createdAt: new Date(this.createdAt),
     };
   }
 }
