@@ -15,6 +15,10 @@ export function createRedisClient(config: ConfigService): Redis {
     ...(password ? { password } : {}),
     lazyConnect: false,
     maxRetriesPerRequest: 2,
+    // Explicit timeouts so a slow or unreachable Redis fails fast; the cache
+    // adapter already degrades gracefully, so a timed-out command just misses.
+    connectTimeout: config.get<number>('redis.connectTimeoutMs', 10_000),
+    commandTimeout: config.get<number>('redis.commandTimeoutMs', 5_000),
   });
 }
 

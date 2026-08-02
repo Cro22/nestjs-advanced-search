@@ -33,11 +33,15 @@ export const envValidationSchema = Joi.object({
   ELASTICSEARCH_PRODUCT_INDEX: Joi.string().default('products'),
   ELASTICSEARCH_USERNAME: Joi.string().allow('').optional(),
   ELASTICSEARCH_PASSWORD: Joi.string().allow('').optional(),
+  ELASTICSEARCH_REQUEST_TIMEOUT_MS: Joi.number().default(30000),
+  ELASTICSEARCH_MAX_RETRIES: Joi.number().default(3),
 
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().default(6379),
   REDIS_TTL_SECONDS: Joi.number().default(60),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
+  REDIS_CONNECT_TIMEOUT_MS: Joi.number().default(10000),
+  REDIS_COMMAND_TIMEOUT_MS: Joi.number().default(5000),
 
   SEARCH_MAX_PAGE_SIZE: Joi.number().default(100),
   AUTOCOMPLETE_MAX_SUGGESTIONS: Joi.number().default(10),

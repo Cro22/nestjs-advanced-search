@@ -234,10 +234,14 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `ELASTICSEARCH_PRODUCT_INDEX`  | `products`                       | Index name                                   |
 | `ELASTICSEARCH_USERNAME`       | unset                            | Basic auth user (set when security is on)    |
 | `ELASTICSEARCH_PASSWORD`       | unset                            | Basic auth password                          |
+| `ELASTICSEARCH_REQUEST_TIMEOUT_MS` | `30000`                      | Per request timeout for the ES client        |
+| `ELASTICSEARCH_MAX_RETRIES`    | `3`                              | ES client retries per request                |
 | `REDIS_HOST`                   | `localhost`                      | Redis host                                   |
 | `REDIS_PORT`                   | `6379`                           | Redis port                                   |
 | `REDIS_PASSWORD`               | unset                            | Redis password (set when requirepass is on)  |
 | `REDIS_TTL_SECONDS`            | `60`                             | Default cache time to live                   |
+| `REDIS_CONNECT_TIMEOUT_MS`     | `10000`                          | Redis connection timeout                     |
+| `REDIS_COMMAND_TIMEOUT_MS`     | `5000`                           | Per command timeout (a timed-out read just misses) |
 | `SEARCH_MAX_PAGE_SIZE`         | `100`                            | Upper bound for the page size                |
 | `AUTOCOMPLETE_MAX_SUGGESTIONS` | `10`                             | Upper bound for autocomplete results         |
 | `API_KEYS`                     | `` (empty)                       | Comma separated `key:role` pairs granting write access, e.g. `k1:admin,k2:ingest`. Empty means no writes are allowed |
@@ -417,6 +421,20 @@ npm run test:e2e
 ```
 
 They need a running Docker daemon (Docker Desktop on Windows and macOS). The first run downloads the service images, so allow a few extra minutes.
+
+## Operations
+
+**Metrics.** Prometheus metrics are exposed at `GET /api/metrics` (admin key required): HTTP request latency by route, cache hit/miss counters, Elasticsearch error counts, and the outbox gauges (`outbox_pending_entries`, `outbox_dead_lettered_entries`). Default process and Node runtime metrics are included.
+
+**Alerting.** Ready-to-load Prometheus alerting rules live in [`ops/alerts.yml`](ops/alerts.yml): a growing outbox backlog, any dead-lettered outbox entries, a high 5xx rate, search p95 latency, and Elasticsearch errors. Point `rule_files` in your `prometheus.yml` at it.
+
+**Timeouts.** The Elasticsearch and Redis clients use explicit, tunable timeouts (`ELASTICSEARCH_REQUEST_TIMEOUT_MS`, `REDIS_COMMAND_TIMEOUT_MS`) so a slow dependency fails fast instead of hanging the request path. The cache degrades gracefully, so a timed-out Redis command is just a miss.
+
+**Load testing.** A [k6](https://k6.io) script in [`ops/loadtest/search.js`](ops/loadtest/search.js) exercises the search and autocomplete read paths with latency and error-rate thresholds:
+
+```bash
+BASE_URL=http://localhost:3000/api k6 run ops/loadtest/search.js
+```
 
 ## Design notes
 

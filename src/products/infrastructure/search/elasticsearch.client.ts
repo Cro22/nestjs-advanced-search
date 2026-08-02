@@ -11,8 +11,9 @@ export function createElasticsearchClient(config: ConfigService): Client {
     // Basic auth only when the cluster runs with security enabled; omitted
     // entirely for the open local stack.
     ...(username && password ? { auth: { username, password } } : {}),
-    // Reasonable defaults for a demo cluster; tune per environment.
-    maxRetries: 3,
-    requestTimeout: 30_000,
+    // Explicit, tunable timeouts so a slow or wedged cluster fails fast on the
+    // request path instead of hanging a client connection.
+    maxRetries: config.get<number>('elasticsearch.maxRetries', 3),
+    requestTimeout: config.get<number>('elasticsearch.requestTimeoutMs', 30_000),
   });
 }

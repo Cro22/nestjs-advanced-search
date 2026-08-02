@@ -23,12 +23,16 @@ export interface AppConfig {
     index: string;
     username?: string;
     password?: string;
+    requestTimeoutMs: number;
+    maxRetries: number;
   };
   redis: {
     host: string;
     port: number;
     ttlSeconds: number;
     password?: string;
+    connectTimeoutMs: number;
+    commandTimeoutMs: number;
   };
   search: {
     maxPageSize: number;
@@ -94,6 +98,8 @@ export default (): AppConfig => ({
     // Optional basic auth, used when the cluster runs with security enabled.
     username: process.env.ELASTICSEARCH_USERNAME || undefined,
     password: process.env.ELASTICSEARCH_PASSWORD || undefined,
+    requestTimeoutMs: parseInt(process.env.ELASTICSEARCH_REQUEST_TIMEOUT_MS ?? '30000', 10),
+    maxRetries: parseInt(process.env.ELASTICSEARCH_MAX_RETRIES ?? '3', 10),
   },
   redis: {
     host: process.env.REDIS_HOST ?? 'localhost',
@@ -101,6 +107,8 @@ export default (): AppConfig => ({
     ttlSeconds: parseInt(process.env.REDIS_TTL_SECONDS ?? '60', 10),
     // Optional, used when Redis runs with requirepass.
     password: process.env.REDIS_PASSWORD || undefined,
+    connectTimeoutMs: parseInt(process.env.REDIS_CONNECT_TIMEOUT_MS ?? '10000', 10),
+    commandTimeoutMs: parseInt(process.env.REDIS_COMMAND_TIMEOUT_MS ?? '5000', 10),
   },
   search: {
     maxPageSize: parseInt(process.env.SEARCH_MAX_PAGE_SIZE ?? '100', 10),
