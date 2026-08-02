@@ -158,7 +158,13 @@ The overlay reads its passwords from the environment with weak demo defaults, so
 
 ### Upgrading an existing volume
 
-A plain `docker compose up --build` migrates an already populated stack in place: `db push` adds the new nullable coordinate columns, the seed backfills coordinates for existing rows, and the boot reindex rebuilds the versioned index (`products_v2`) with the new mapping. `docker compose down -v` remains the clean slate path.
+A plain `docker compose up --build` migrates an already populated stack in place: the entrypoint runs `prisma migrate deploy` to apply any pending migrations, the seed backfills data for existing rows, and the boot reindex rebuilds the versioned index (`products_v2`) with the new mapping. `docker compose down -v` remains the clean slate path.
+
+A volume created before migrations existed (schema applied with `db push`) has the tables but no migration history. Baseline it once so `migrate deploy` does not try to recreate them:
+
+```bash
+npx prisma migrate resolve --applied 20260801000000_init
+```
 
 ## Local development
 
@@ -176,7 +182,7 @@ npm run prisma:generate
 cp .env.example .env
 
 # 4. Prepare the database and the index
-npm run bootstrap        # db push, seed, reindex
+npm run bootstrap        # migrate deploy, seed, reindex
 
 # 5. Run the API in watch mode
 npm run start:dev
@@ -188,10 +194,12 @@ Useful scripts:
 | ------------------------- | ----------------------------------------------- |
 | `npm run start:dev`       | Run the API in watch mode                       |
 | `npm run build`           | Compile to `dist/` (tsc plus tsc-alias)         |
-| `npm run db:push`         | Sync the Prisma schema to Postgres              |
+| `npm run db:migrate`      | Create and apply a migration in development     |
+| `npm run db:migrate:deploy` | Apply pending migrations (production/CI)       |
+| `npm run db:push`         | Sync the schema without a migration (prototyping only) |
 | `npm run db:seed`         | Seed sample products with faker                 |
 | `npm run search:reindex`  | Force a full rebuild of the Elasticsearch index |
-| `npm run bootstrap`       | Run db:push, db:seed and search:reindex in order|
+| `npm run bootstrap`       | Run db:migrate:deploy, db:seed and search:reindex in order|
 | `npm test`                | Run the unit test suite                         |
 | `npm run test:e2e`        | Run the end to end suite (needs Docker)         |
 | `npm run test:cov`        | Run tests with coverage, enforced thresholds    |
@@ -430,7 +438,7 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 **Data model.** Postgres holds the write model and is the single source of truth. Elasticsearch is a read projection. Keeping the two responsibilities separate lets each side use the tool it is good at, and the reindex command can always rebuild the index from Postgres.
 
-**Prisma 7.** Persistence uses Prisma 7 with the pg driver adapter. The client talks to Postgres through the `pg` driver instead of a bundled query engine, so there is no native engine binary to match against the container architecture. The connection URL lives in `prisma.config.ts` and is read from `DATABASE_URL`, shared by both the CLI (`db push`) and the application.
+**Prisma 7.** Persistence uses Prisma 7 with the pg driver adapter. The client talks to Postgres through the `pg` driver instead of a bundled query engine, so there is no native engine binary to match against the container architecture. The connection URL lives in `prisma.config.ts` and is read from `DATABASE_URL`, shared by both the CLI (`migrate deploy`) and the application. Schema changes are versioned migrations under `prisma/migrations`, applied at container start by the entrypoint and verified against the schema in CI.
 
 **Error handling.** A global exception filter turns any error into a consistent JSON envelope, and validation runs through a global pipe that rejects unknown fields.
 

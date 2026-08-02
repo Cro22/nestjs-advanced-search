@@ -21,10 +21,12 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config test/jest-e2e.json --runInBand",
     "prisma:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
     "db:push": "prisma db push",
     "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
     "search:reindex": "ts-node -r tsconfig-paths/register src/cli/reindex.ts --force",
-    "bootstrap": "npm run db:push && npm run db:seed && npm run search:reindex"
+    "bootstrap": "npm run db:migrate:deploy && npm run db:seed && npm run search:reindex"
   },
   "dependencies": {
     "@elastic/elasticsearch": "~8.14.0",
