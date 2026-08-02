@@ -63,6 +63,9 @@ services:
       SEARCH_MAX_PAGE_SIZE: 100
       AUTOCOMPLETE_MAX_SUGGESTIONS: 10
       SEED_PRODUCT_COUNT: 500
+      # Demo keys so writes work out of the box in the trial stack. Override with
+      # your own, and see docker-compose.hardened.yml for a production posture.
+      API_KEYS: ${API_KEYS:-demo-admin-key:admin,demo-ingest-key:ingest}
     ports:
       - '3000:3000'
     depends_on:

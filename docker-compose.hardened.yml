@@ -3,8 +3,10 @@
 #   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up --build
 #
 # It turns on authentication everywhere the base stack leaves open for a
-# friction free local evaluation: Postgres, Redis (requirepass) and
-# Elasticsearch (xpack security). The passwords below are interpolated from the
+# friction free local evaluation: the HTTP API (API keys), Postgres, Redis
+# (requirepass) and Elasticsearch (xpack security). It also disables Swagger, as
+# a production instance should not expose its full API surface. The passwords
+# below are interpolated from the
 # environment with weak demo defaults; set real ones in a .env file or the shell
 # before using this for anything beyond a local trial. HTTP TLS is intentionally
 # left off so the stack still runs with no certificates to manage; a real
@@ -41,3 +43,8 @@ services:
       ELASTICSEARCH_USERNAME: elastic
       ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:-s3arch_es_ChangeMe}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-s3arch_redis_ChangeMe}
+      # Write access requires an API key; set real ones before any real use.
+      API_KEYS: ${API_KEYS:-s3arch_admin_ChangeMe:admin}
+      # Do not expose the API surface or grant cross-origin access by default.
+      SWAGGER_ENABLED: 'false'
+      CORS_ORIGINS: ${CORS_ORIGINS:-}

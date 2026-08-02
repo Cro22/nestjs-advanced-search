@@ -15,8 +15,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { Roles } from '@/auth/roles.decorator';
 import { AUTOCOMPLETE_THROTTLE } from '@/shared/infrastructure/http/throttle.constants';
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
@@ -24,7 +25,7 @@ import { CreateProductUseCase } from '@/products/application/use-cases/create-pr
 import { UpdateProductUseCase } from '@/products/application/use-cases/update-product.use-case';
 import { DeleteProductUseCase } from '@/products/application/use-cases/delete-product.use-case';
 import { RecordProductViewUseCase } from '@/products/application/use-cases/record-product-view.use-case';
-import { ProductNotFoundError } from '@/products/domain/product.errors';
+import { InvalidProductError, ProductNotFoundError } from '@/products/domain/product.errors';
 import {
   InvalidSearchQueryError,
   SearchUnavailableError,
@@ -92,6 +93,8 @@ export class ProductsController {
   }
 
   @Post()
+  @Roles('admin')
+  @ApiBearerAuth('api-key')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a product',
@@ -101,23 +104,28 @@ export class ProductsController {
     if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
       throw new BadRequestException('latitude and longitude must be provided together');
     }
-    const product = await this.createProduct.execute({
-      name: dto.name,
-      description: dto.description,
-      category: dto.category,
-      subcategories: dto.subcategories,
-      location: dto.location,
-      coordinates:
-        dto.latitude !== undefined && dto.longitude !== undefined
-          ? { lat: dto.latitude, lon: dto.longitude }
-          : undefined,
-      price: dto.price,
-      popularity: dto.popularity,
-    });
-    return toProductResponseFromDomain(product);
+    try {
+      const product = await this.createProduct.execute({
+        name: dto.name,
+        description: dto.description,
+        category: dto.category,
+        subcategories: dto.subcategories,
+        location: dto.location,
+        coordinates:
+          dto.latitude !== undefined && dto.longitude !== undefined
+            ? { lat: dto.latitude, lon: dto.longitude }
+            : undefined,
+        price: dto.price,
+      });
+      return toProductResponseFromDomain(product);
+    } catch (error) {
+      this.rethrow(error);
+    }
   }
 
   @Put(':id')
+  @Roles('admin')
+  @ApiBearerAuth('api-key')
   @ApiOperation({
     summary: 'Update a product',
     description:
@@ -140,7 +148,6 @@ export class ProductsController {
             ? { lat: dto.latitude, lon: dto.longitude }
             : undefined,
         price: dto.price,
-        popularity: dto.popularity,
       });
       return toProductResponseFromDomain(product);
     } catch (error) {
@@ -149,6 +156,8 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @Roles('admin')
+  @ApiBearerAuth('api-key')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a product',
@@ -163,6 +172,8 @@ export class ProductsController {
   }
 
   @Post(':id/view')
+  @Roles('admin', 'ingest')
+  @ApiBearerAuth('api-key')
   @ApiOperation({
     summary: 'Record a product view',
     description:
@@ -184,7 +195,7 @@ export class ProductsController {
    * Elasticsearch error.
    */
   private rethrow(error: unknown): never {
-    if (error instanceof InvalidSearchQueryError) {
+    if (error instanceof InvalidSearchQueryError || error instanceof InvalidProductError) {
       throw new BadRequestException(error.message);
     }
     if (error instanceof ProductNotFoundError) {

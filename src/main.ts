@@ -17,19 +17,24 @@ async function bootstrap(): Promise<void> {
 
   configureApp(app, config);
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Advanced Product Search API')
-    .setDescription(
-      'Product search with Elasticsearch relevance, Redis backed autocomplete, faceting, filtering, geo search, pagination and sorting.',
-    )
-    .setVersion('1.0')
-    .build();
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
+  // Swagger exposes the full API surface, so it is served only when enabled
+  // (default on; turn SWAGGER_ENABLED off in production).
+  if (config.get<boolean>('swagger.enabled', true)) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Advanced Product Search API')
+      .setDescription(
+        'Product search with Elasticsearch relevance, Redis backed autocomplete, faceting, filtering, geo search, pagination and sorting.',
+      )
+      .setVersion('1.0')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', description: 'API key' }, 'api-key')
+      .build();
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup(`${apiPrefix}/docs`, app, document);
+    logger.log(`Swagger docs at http://localhost:${port}/${apiPrefix}/docs`);
+  }
 
   await app.listen(port);
   logger.log(`API listening on http://localhost:${port}/${apiPrefix}`);
-  logger.log(`Swagger docs at http://localhost:${port}/${apiPrefix}/docs`);
 }
 
 bootstrap();

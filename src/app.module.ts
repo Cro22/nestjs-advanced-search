@@ -9,6 +9,7 @@ import Redis from 'ioredis';
 import { LoggerModule } from 'nestjs-pino';
 import configuration from '@/config/configuration';
 import { envValidationSchema } from '@/config/env.validation';
+import { AuthModule } from '@/auth/auth.module';
 import { ProductsModule } from '@/products/products.module';
 import { HealthModule } from '@/health/health.module';
 import { MetricsModule } from '@/shared/infrastructure/metrics/metrics.module';
@@ -64,6 +65,7 @@ import { ResilientThrottlerStorage } from '@/shared/infrastructure/http/resilien
         ),
       }),
     }),
+    AuthModule,
     MetricsModule,
     ProductsModule,
     HealthModule,

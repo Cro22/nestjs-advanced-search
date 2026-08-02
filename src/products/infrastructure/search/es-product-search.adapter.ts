@@ -287,10 +287,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
   }
 
   async search(criteria: ProductSearchCriteria): Promise<ProductSearchResult> {
-    const request = {
-      index: this.aliasName,
-      ...EsQueryBuilder.buildSearchBody(criteria),
-    } as unknown as estypes.SearchRequest;
+    const request = this.toSearchRequest(EsQueryBuilder.buildSearchBody(criteria));
 
     let response: estypes.SearchResponse<ProductDocument>;
     try {
@@ -349,10 +346,7 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
   }
 
   async autocomplete(prefix: string, limit: number): Promise<string[]> {
-    const request = {
-      index: this.aliasName,
-      ...EsQueryBuilder.buildAutocompleteBody(prefix, limit),
-    } as unknown as estypes.SearchRequest;
+    const request = this.toSearchRequest(EsQueryBuilder.buildAutocompleteBody(prefix, limit));
 
     let response: estypes.SearchResponse<ProductDocument>;
     try {
@@ -367,6 +361,15 @@ export class EsProductSearchAdapter implements ProductSearchIndex {
   }
 
   // --- helpers -------------------------------------------------------------
+
+  /**
+   * The query builder returns a plain body object, which is looser than the
+   * client's generated SearchRequest type. This is the single boundary where we
+   * bridge the two, so the cast lives here instead of at every call site.
+   */
+  private toSearchRequest(body: object): estypes.SearchRequest {
+    return { index: this.aliasName, ...body } as unknown as estypes.SearchRequest;
+  }
 
   private async createIndex(physicalName: string): Promise<void> {
     await this.client.indices.create({

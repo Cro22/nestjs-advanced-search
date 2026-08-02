@@ -102,7 +102,7 @@ Imports use the `@/` alias mapped to `src/` (for example `@/products/domain/prod
 
 | Concern            | Choice                          |
 | ------------------ | ------------------------------- |
-| Framework          | NestJS 10                       |
+| Framework          | NestJS 11                       |
 | Language           | TypeScript                      |
 | Search engine      | Elasticsearch 8                 |
 | Cache and suggest  | Redis 7                         |
@@ -158,7 +158,13 @@ The overlay reads its passwords from the environment with weak demo defaults, so
 
 ### Upgrading an existing volume
 
-A plain `docker compose up --build` migrates an already populated stack in place: `db push` adds the new nullable coordinate columns, the seed backfills coordinates for existing rows, and the boot reindex rebuilds the versioned index (`products_v2`) with the new mapping. `docker compose down -v` remains the clean slate path.
+A plain `docker compose up --build` migrates an already populated stack in place: the entrypoint runs `prisma migrate deploy` to apply any pending migrations, the seed backfills data for existing rows, and the boot reindex rebuilds the versioned index (`products_v2`) with the new mapping. `docker compose down -v` remains the clean slate path.
+
+A volume created before migrations existed (schema applied with `db push`) has the tables but no migration history. Baseline it once so `migrate deploy` does not try to recreate them:
+
+```bash
+npx prisma migrate resolve --applied 20260801000000_init
+```
 
 ## Local development
 
@@ -176,7 +182,7 @@ npm run prisma:generate
 cp .env.example .env
 
 # 4. Prepare the database and the index
-npm run bootstrap        # db push, seed, reindex
+npm run bootstrap        # migrate deploy, seed, reindex
 
 # 5. Run the API in watch mode
 npm run start:dev
@@ -188,10 +194,12 @@ Useful scripts:
 | ------------------------- | ----------------------------------------------- |
 | `npm run start:dev`       | Run the API in watch mode                       |
 | `npm run build`           | Compile to `dist/` (tsc plus tsc-alias)         |
-| `npm run db:push`         | Sync the Prisma schema to Postgres              |
+| `npm run db:migrate`      | Create and apply a migration in development     |
+| `npm run db:migrate:deploy` | Apply pending migrations (production/CI)       |
+| `npm run db:push`         | Sync the schema without a migration (prototyping only) |
 | `npm run db:seed`         | Seed sample products with faker                 |
 | `npm run search:reindex`  | Force a full rebuild of the Elasticsearch index |
-| `npm run bootstrap`       | Run db:push, db:seed and search:reindex in order|
+| `npm run bootstrap`       | Run db:migrate:deploy, db:seed and search:reindex in order|
 | `npm test`                | Run the unit test suite                         |
 | `npm run test:e2e`        | Run the end to end suite (needs Docker)         |
 | `npm run test:cov`        | Run tests with coverage, enforced thresholds    |
@@ -215,22 +223,44 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `THROTTLE_AUTOCOMPLETE_TTL_MS` | `10000`                          | Autocomplete rate limit window               |
 | `THROTTLE_AUTOCOMPLETE_LIMIT`  | `30`                             | Autocomplete requests per window and client  |
 | `OUTBOX_POLL_MS`               | `5000`                           | Interval of the outbox processor             |
+| `OUTBOX_BATCH_SIZE`            | `100`                            | Entries claimed per poll                     |
+| `OUTBOX_MAX_ATTEMPTS`          | `10`                             | Attempts before an entry is dead-lettered    |
+| `OUTBOX_BACKOFF_BASE_MS`       | `1000`                           | Base delay for the exponential retry backoff |
+| `OUTBOX_BACKOFF_MAX_MS`        | `60000`                          | Cap on the retry backoff delay               |
+| `OUTBOX_LOCK_MS`               | `60000`                          | Lock horizon on a claimed entry (retried if a worker dies mid-flight) |
+| `OUTBOX_RETENTION_MS`          | `604800000`                      | Age after which processed entries are purged (default 7 days) |
 | `DATABASE_URL`                 | see `.env.example`               | Postgres connection string                   |
 | `ELASTICSEARCH_NODE`           | `http://localhost:9200`          | Elasticsearch endpoint                       |
 | `ELASTICSEARCH_PRODUCT_INDEX`  | `products`                       | Index name                                   |
 | `ELASTICSEARCH_USERNAME`       | unset                            | Basic auth user (set when security is on)    |
 | `ELASTICSEARCH_PASSWORD`       | unset                            | Basic auth password                          |
+| `ELASTICSEARCH_REQUEST_TIMEOUT_MS` | `30000`                      | Per request timeout for the ES client        |
+| `ELASTICSEARCH_MAX_RETRIES`    | `3`                              | ES client retries per request                |
 | `REDIS_HOST`                   | `localhost`                      | Redis host                                   |
 | `REDIS_PORT`                   | `6379`                           | Redis port                                   |
 | `REDIS_PASSWORD`               | unset                            | Redis password (set when requirepass is on)  |
 | `REDIS_TTL_SECONDS`            | `60`                             | Default cache time to live                   |
+| `REDIS_CONNECT_TIMEOUT_MS`     | `10000`                          | Redis connection timeout                     |
+| `REDIS_COMMAND_TIMEOUT_MS`     | `5000`                           | Per command timeout (a timed-out read just misses) |
 | `SEARCH_MAX_PAGE_SIZE`         | `100`                            | Upper bound for the page size                |
 | `AUTOCOMPLETE_MAX_SUGGESTIONS` | `10`                             | Upper bound for autocomplete results         |
+| `API_KEYS`                     | `` (empty)                       | Comma separated `key:role` pairs granting write access, e.g. `k1:admin,k2:ingest`. Empty means no writes are allowed |
+| `CORS_ORIGINS`                 | `` (empty)                       | Comma separated allowed origins. Empty grants no cross-origin access in production (permissive in development) |
+| `SWAGGER_ENABLED`              | `true`                           | Serve Swagger at `/api/docs`. Set to `false` in production |
 | `SEED_PRODUCT_COUNT`           | `500`                            | Number of products created by the seed       |
 
 ## API reference
 
 Base URL: `http://localhost:3000/api`. Interactive documentation lives at `/api/docs`.
+
+### Authentication
+
+Reads (`search`, `autocomplete`, `health`) are public. Writes (`POST`, `PUT`,
+`DELETE /products`), the view endpoint and `GET /metrics` require an API key
+passed as `Authorization: Bearer <key>` (or `X-API-Key: <key>`). Keys and their
+roles are configured with `API_KEYS` (see [Configuration](#configuration)):
+`admin` may mutate products and scrape metrics; `ingest` may only record views.
+A missing or unknown key is `401`; a valid key without the required role is `403`.
 
 ### GET /products/search
 
@@ -324,11 +354,12 @@ curl "http://localhost:3000/api/products/autocomplete?q=lap&limit=5"
 
 ### POST /products
 
-Creates a product in Postgres and projects it into Elasticsearch in the same use case, so it is immediately searchable. The write also bumps the cache generation, which instantly invalidates every cached search page. Coordinates are optional and must come as a pair.
+Creates a product in Postgres and projects it into Elasticsearch in the same use case, so it is immediately searchable. The write also bumps the cache generation, which instantly invalidates every cached search page. Coordinates are optional and must come as a pair. Requires an `admin` API key. Popularity is server-owned and always starts at `0`; it is not accepted from the client.
 
 ```bash
 curl -X POST "http://localhost:3000/api/products" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <admin-key>" \
   -d '{
     "name": "Aurora Laptop Pro",
     "description": "A lightweight laptop for everyday use",
@@ -337,25 +368,25 @@ curl -X POST "http://localhost:3000/api/products" \
     "location": "Madrid",
     "latitude": 40.4168,
     "longitude": -3.7038,
-    "price": 1299.99,
-    "popularity": 120
+    "price": 1299.99
   }'
 ```
 
 ### PUT /products/:id
 
-Full replacement of a product. The identity and creation date are kept, and so is the accumulated popularity unless the body provides one. The change is searchable on the next request. Returns `404` for an unknown id.
+Full replacement of a product. The identity, creation date and accumulated popularity are all kept; popularity only ever moves through the view endpoint. The change is searchable on the next request. Requires an `admin` API key. Returns `404` for an unknown id.
 
 ### DELETE /products/:id
 
-Removes the product from Postgres and from the search index. Returns `204` on success and `404` for an unknown id.
+Removes the product from Postgres and from the search index. Requires an `admin` API key. Returns `204` on success and `404` for an unknown id.
 
 ### POST /products/:id/view
 
-Records a view: atomically increments the popularity in Postgres and reprojects the document, so relevance boosting and popularity sorting reflect real interactions. Returns the new popularity.
+Records a view: atomically increments the popularity in Postgres and reprojects the document, so relevance boosting and popularity sorting reflect real interactions. Requires an `admin` or `ingest` API key. Returns the new popularity.
 
 ```bash
-curl -X POST "http://localhost:3000/api/products/<id>/view"
+curl -X POST "http://localhost:3000/api/products/<id>/view" \
+  -H "Authorization: Bearer <ingest-key>"
 ```
 
 ```json
@@ -391,6 +422,20 @@ npm run test:e2e
 
 They need a running Docker daemon (Docker Desktop on Windows and macOS). The first run downloads the service images, so allow a few extra minutes.
 
+## Operations
+
+**Metrics.** Prometheus metrics are exposed at `GET /api/metrics` (admin key required): HTTP request latency by route, cache hit/miss counters, Elasticsearch error counts, and the outbox gauges (`outbox_pending_entries`, `outbox_dead_lettered_entries`). Default process and Node runtime metrics are included.
+
+**Alerting.** Ready-to-load Prometheus alerting rules live in [`ops/alerts.yml`](ops/alerts.yml): a growing outbox backlog, any dead-lettered outbox entries, a high 5xx rate, search p95 latency, and Elasticsearch errors. Point `rule_files` in your `prometheus.yml` at it.
+
+**Timeouts.** The Elasticsearch and Redis clients use explicit, tunable timeouts (`ELASTICSEARCH_REQUEST_TIMEOUT_MS`, `REDIS_COMMAND_TIMEOUT_MS`) so a slow dependency fails fast instead of hanging the request path. The cache degrades gracefully, so a timed-out Redis command is just a miss.
+
+**Load testing.** A [k6](https://k6.io) script in [`ops/loadtest/search.js`](ops/loadtest/search.js) exercises the search and autocomplete read paths with latency and error-rate thresholds:
+
+```bash
+BASE_URL=http://localhost:3000/api k6 run ops/loadtest/search.js
+```
+
 ## Design notes
 
 **Combined faceting.** Active filters are applied through `post_filter` so they narrow the hits without shrinking the top level aggregations. Each facet aggregation then reapplies every other active filter but not its own, so selecting one category still shows the sibling categories while the location and price facets already reflect that choice. This is the behaviour a faceted search UI expects.
@@ -407,6 +452,8 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 **Transactional outbox.** Every product mutation writes an outbox entry in the same Postgres transaction. The request path still indexes synchronously (so writes are searchable on the next request), and a background processor replays pending entries against the index, which turns an Elasticsearch outage at write time into a short delay instead of silent drift. Replaying an already projected write is an idempotent upsert.
 
+The processor is safe to run on every replica. It claims a batch with `SELECT … FOR UPDATE SKIP LOCKED`, so two workers never grab the same entry, and stamps a lock horizon on each claimed row that makes it eligible again if the worker dies mid-flight. Failures back off exponentially; an entry that exhausts `OUTBOX_MAX_ATTEMPTS` is dead-lettered (`failed_at` set, surfaced as the `outbox_dead_lettered_entries` metric) instead of retrying forever, and processed entries are purged past their retention window so the table stays small.
+
 **Live popularity.** `POST /products/:id/view` atomically increments the popularity that the `function_score` blends into relevance and that `sort=popularity` ranks by. View events deliberately do not flush the search cache: a ranking nudge does not justify invalidating every cached page, and the short TTL bounds the staleness.
 
 **Caching.** Search pages are cached in Redis under `search:v{schema}:g{generation}:{sha1(criteria)}`. Hashing keeps keys short and stable regardless of filter order, the schema version fences off stale shapes after a deploy, and the generation counter is bumped by every write, which instantly invalidates all cached pages without scanning Redis. Old entries simply expire through their TTL. Autocomplete uses the same scheme. Cached dates are rehydrated into real Date objects on read. Every cache operation degrades gracefully, so a Redis outage slows the API down instead of taking it down.
@@ -417,7 +464,7 @@ They need a running Docker daemon (Docker Desktop on Windows and macOS). The fir
 
 **Data model.** Postgres holds the write model and is the single source of truth. Elasticsearch is a read projection. Keeping the two responsibilities separate lets each side use the tool it is good at, and the reindex command can always rebuild the index from Postgres.
 
-**Prisma 7.** Persistence uses Prisma 7 with the pg driver adapter. The client talks to Postgres through the `pg` driver instead of a bundled query engine, so there is no native engine binary to match against the container architecture. The connection URL lives in `prisma.config.ts` and is read from `DATABASE_URL`, shared by both the CLI (`db push`) and the application.
+**Prisma 7.** Persistence uses Prisma 7 with the pg driver adapter. The client talks to Postgres through the `pg` driver instead of a bundled query engine, so there is no native engine binary to match against the container architecture. The connection URL lives in `prisma.config.ts` and is read from `DATABASE_URL`, shared by both the CLI (`migrate deploy`) and the application. Schema changes are versioned migrations under `prisma/migrations`, applied at container start by the entrypoint and verified against the schema in CI.
 
 **Error handling.** A global exception filter turns any error into a consistent JSON envelope, and validation runs through a global pipe that rejects unknown fields.
 

@@ -42,6 +42,13 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  /** Outbox entries that exhausted their retries and need manual attention. */
+  readonly outboxDeadLettered = new Gauge({
+    name: 'outbox_dead_lettered_entries',
+    help: 'Outbox entries that failed permanently after exhausting retries',
+    registers: [this.registry],
+  });
+
   constructor() {
     collectDefaultMetrics({ register: this.registry });
   }

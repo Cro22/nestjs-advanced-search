@@ -20,6 +20,12 @@ export const envValidationSchema = Joi.object({
   THROTTLE_AUTOCOMPLETE_LIMIT: Joi.number().default(30),
 
   OUTBOX_POLL_MS: Joi.number().default(5000),
+  OUTBOX_BATCH_SIZE: Joi.number().default(100),
+  OUTBOX_MAX_ATTEMPTS: Joi.number().default(10),
+  OUTBOX_BACKOFF_BASE_MS: Joi.number().default(1000),
+  OUTBOX_BACKOFF_MAX_MS: Joi.number().default(60000),
+  OUTBOX_LOCK_MS: Joi.number().default(60000),
+  OUTBOX_RETENTION_MS: Joi.number().default(604800000),
 
   DATABASE_URL: Joi.string().required(),
 
@@ -27,12 +33,24 @@ export const envValidationSchema = Joi.object({
   ELASTICSEARCH_PRODUCT_INDEX: Joi.string().default('products'),
   ELASTICSEARCH_USERNAME: Joi.string().allow('').optional(),
   ELASTICSEARCH_PASSWORD: Joi.string().allow('').optional(),
+  ELASTICSEARCH_REQUEST_TIMEOUT_MS: Joi.number().default(30000),
+  ELASTICSEARCH_MAX_RETRIES: Joi.number().default(3),
 
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().default(6379),
   REDIS_TTL_SECONDS: Joi.number().default(60),
   REDIS_PASSWORD: Joi.string().allow('').optional(),
+  REDIS_CONNECT_TIMEOUT_MS: Joi.number().default(10000),
+  REDIS_COMMAND_TIMEOUT_MS: Joi.number().default(5000),
 
   SEARCH_MAX_PAGE_SIZE: Joi.number().default(100),
   AUTOCOMPLETE_MAX_SUGGESTIONS: Joi.number().default(10),
+
+  // Comma separated `key:role` pairs, e.g. "k1:admin,k2:ingest". Empty means no
+  // write access is granted until keys are configured.
+  API_KEYS: Joi.string().allow('').default(''),
+  // Comma separated allowed origins. Empty disables cross-origin access in prod.
+  CORS_ORIGINS: Joi.string().allow('').default(''),
+  // Swagger is served unless explicitly disabled; turn off in production.
+  SWAGGER_ENABLED: Joi.boolean().default(true),
 });

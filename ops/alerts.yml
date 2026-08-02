@@ -1,0 +1,58 @@
+# Prometheus alerting rules for the Advanced Product Search API.
+# Load with `rule_files` in prometheus.yml. Metric names match those exposed at
+# GET /api/metrics (see src/shared/infrastructure/metrics).
+groups:
+  - name: nestjs-advanced-search
+    rules:
+      - alert: OutboxBacklogGrowing
+        # The processor is not keeping up: entries are piling up faster than they drain.
+        expr: outbox_pending_entries > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Outbox backlog is not draining'
+          description: '{{ $value }} entries pending for 10m; the search projection is falling behind.'
+
+      - alert: OutboxDeadLetters
+        # Poison entries that exhausted their retries need a human.
+        expr: outbox_dead_lettered_entries > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Outbox has dead-lettered entries'
+          description: '{{ $value }} entries exhausted their retries and need manual attention.'
+
+      - alert: HighHttpErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status=~"5.."}[5m]))
+            / sum(rate(http_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Over 5% of HTTP requests are failing'
+          description: 'The 5xx ratio has been above 5% for 5m.'
+
+      - alert: HighSearchLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(http_request_duration_seconds_bucket{route="/api/products/search"}[5m]))
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Search p95 latency above 1s'
+          description: 'p95 latency for /api/products/search has been above 1s for 10m.'
+
+      - alert: ElasticsearchErrors
+        expr: rate(search_errors_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Elasticsearch operations are failing'
+          description: '{{ $value }} search backend errors/s over the last 5m.'

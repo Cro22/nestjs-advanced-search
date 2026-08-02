@@ -4,7 +4,7 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# The Prisma schema engine (used by db push) still needs OpenSSL on Alpine.
+# The Prisma schema engine (used by migrate deploy) still needs OpenSSL on Alpine.
 # The query engine is gone in Prisma 7 because the pg driver adapter replaces it.
 RUN apk add --no-cache openssl
 
@@ -24,7 +24,7 @@ FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
-# The Prisma schema engine (used by db push) still needs OpenSSL on Alpine.
+# The Prisma schema engine (used by migrate deploy) still needs OpenSSL on Alpine.
 # The query engine is gone in Prisma 7 because the pg driver adapter replaces it.
 RUN apk add --no-cache openssl
 
@@ -48,7 +48,7 @@ USER node
 
 EXPOSE 3000
 
-# start-period covers the entrypoint bootstrap (db push, seed backfill and a
+# start-period covers the entrypoint bootstrap (migrate deploy, seed backfill and a
 # full reindex after a schema version bump). Adjust the URL if PORT or
 # API_PREFIX change.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \

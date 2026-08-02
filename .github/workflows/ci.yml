@@ -22,6 +22,37 @@ jobs:
       # test:cov enforces the coverageThreshold in package.json
       - run: npm run test:cov
 
+  migrations:
+    name: migrations apply and match schema
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: search
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/search?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      # Fail the build if the committed migrations do not reproduce schema.prisma,
+      # i.e. someone edited the schema without generating a migration.
+      - run: npx prisma migrate diff --from-config-datasource prisma.config.ts --to-schema prisma/schema.prisma --exit-code
+
   e2e:
     name: end to end tests
     runs-on: ubuntu-latest

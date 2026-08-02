@@ -3,7 +3,6 @@ import { Type } from 'class-transformer';
 import {
   ArrayNotEmpty,
   IsArray,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -60,10 +59,7 @@ export class CreateProductDto {
   @Min(0)
   price!: number;
 
-  @ApiPropertyOptional({ example: 100, default: 0 })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  popularity?: number;
+  // popularity is deliberately not accepted from clients: it is an accumulated
+  // relevance signal owned by the server and only ever moved by POST :id/view.
+  // Creates start it at 0; updates preserve whatever the product had.
 }
