@@ -102,7 +102,7 @@ Imports use the `@/` alias mapped to `src/` (for example `@/products/domain/prod
 
 | Concern            | Choice                          |
 | ------------------ | ------------------------------- |
-| Framework          | NestJS 10                       |
+| Framework          | NestJS 11                       |
 | Language           | TypeScript                      |
 | Search engine      | Elasticsearch 8                 |
 | Cache and suggest  | Redis 7                         |

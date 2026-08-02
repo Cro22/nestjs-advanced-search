@@ -24,7 +24,7 @@ import { CreateProductUseCase } from '@/products/application/use-cases/create-pr
 import { UpdateProductUseCase } from '@/products/application/use-cases/update-product.use-case';
 import { DeleteProductUseCase } from '@/products/application/use-cases/delete-product.use-case';
 import { RecordProductViewUseCase } from '@/products/application/use-cases/record-product-view.use-case';
-import { ProductNotFoundError } from '@/products/domain/product.errors';
+import { InvalidProductError, ProductNotFoundError } from '@/products/domain/product.errors';
 import {
   InvalidSearchQueryError,
   SearchUnavailableError,
@@ -101,20 +101,23 @@ export class ProductsController {
     if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
       throw new BadRequestException('latitude and longitude must be provided together');
     }
-    const product = await this.createProduct.execute({
-      name: dto.name,
-      description: dto.description,
-      category: dto.category,
-      subcategories: dto.subcategories,
-      location: dto.location,
-      coordinates:
-        dto.latitude !== undefined && dto.longitude !== undefined
-          ? { lat: dto.latitude, lon: dto.longitude }
-          : undefined,
-      price: dto.price,
-      popularity: dto.popularity,
-    });
-    return toProductResponseFromDomain(product);
+    try {
+      const product = await this.createProduct.execute({
+        name: dto.name,
+        description: dto.description,
+        category: dto.category,
+        subcategories: dto.subcategories,
+        location: dto.location,
+        coordinates:
+          dto.latitude !== undefined && dto.longitude !== undefined
+            ? { lat: dto.latitude, lon: dto.longitude }
+            : undefined,
+        price: dto.price,
+      });
+      return toProductResponseFromDomain(product);
+    } catch (error) {
+      this.rethrow(error);
+    }
   }
 
   @Put(':id')
@@ -140,7 +143,6 @@ export class ProductsController {
             ? { lat: dto.latitude, lon: dto.longitude }
             : undefined,
         price: dto.price,
-        popularity: dto.popularity,
       });
       return toProductResponseFromDomain(product);
     } catch (error) {
@@ -184,7 +186,7 @@ export class ProductsController {
    * Elasticsearch error.
    */
   private rethrow(error: unknown): never {
-    if (error instanceof InvalidSearchQueryError) {
+    if (error instanceof InvalidSearchQueryError || error instanceof InvalidProductError) {
       throw new BadRequestException(error.message);
     }
     if (error instanceof ProductNotFoundError) {

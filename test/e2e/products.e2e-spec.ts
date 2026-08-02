@@ -37,12 +37,13 @@ describe('POST /api/products (e2e)', () => {
         latitude: 40.42,
         longitude: -3.7,
         price: 1234.56,
-        popularity: 7,
       })
       .expect(201);
 
     expect(created.body.id).toBeDefined();
     expect(created.body.coordinates).toEqual({ lat: 40.42, lon: -3.7 });
+    // popularity is server-owned: a fresh product always starts at 0.
+    expect(created.body.popularity).toBe(0);
 
     const after = await request(http)
       .get('/api/products/search')

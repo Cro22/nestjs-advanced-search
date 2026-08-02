@@ -1,4 +1,9 @@
 import { GeoPoint, isValidGeoPoint } from '@/products/domain/geo';
+import {
+  InvalidProductCoordinatesError,
+  InvalidProductNameError,
+  NegativeProductPriceError,
+} from '@/products/domain/product.errors';
 
 export interface ProductProps {
   id: string;
@@ -45,13 +50,13 @@ export class Product {
 
   static create(props: ProductProps): Product {
     if (!props.name?.trim()) {
-      throw new Error('Product name is required');
+      throw new InvalidProductNameError();
     }
     if (props.price < 0) {
-      throw new Error('Product price cannot be negative');
+      throw new NegativeProductPriceError();
     }
     if (props.coordinates && !isValidGeoPoint(props.coordinates)) {
-      throw new Error('Product coordinates are out of range');
+      throw new InvalidProductCoordinatesError();
     }
     return new Product({
       ...props,
