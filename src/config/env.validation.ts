@@ -35,4 +35,12 @@ export const envValidationSchema = Joi.object({
 
   SEARCH_MAX_PAGE_SIZE: Joi.number().default(100),
   AUTOCOMPLETE_MAX_SUGGESTIONS: Joi.number().default(10),
+
+  // Comma separated `key:role` pairs, e.g. "k1:admin,k2:ingest". Empty means no
+  // write access is granted until keys are configured.
+  API_KEYS: Joi.string().allow('').default(''),
+  // Comma separated allowed origins. Empty disables cross-origin access in prod.
+  CORS_ORIGINS: Joi.string().allow('').default(''),
+  // Swagger is served unless explicitly disabled; turn off in production.
+  SWAGGER_ENABLED: Joi.boolean().default(true),
 });

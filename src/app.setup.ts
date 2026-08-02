@@ -11,11 +11,21 @@ import { AllExceptionsFilter } from '@/shared/infrastructure/http/all-exceptions
  */
 export function configureApp(app: INestApplication, config: ConfigService): void {
   const apiPrefix = config.get<string>('apiPrefix', 'api');
+  const env = config.get<string>('env', 'development');
+  const corsOrigins = config.get<string[]>('cors.origins', []);
 
   app.setGlobalPrefix(apiPrefix);
   app.use(helmet());
   app.use(compression());
-  app.enableCors();
+
+  // Restrict CORS to configured origins. With none set, development stays
+  // permissive for local tooling, but production grants no cross-origin access
+  // rather than reflecting every origin.
+  if (corsOrigins.length > 0) {
+    app.enableCors({ origin: corsOrigins });
+  } else if (env !== 'production') {
+    app.enableCors();
+  }
 
   app.useGlobalPipes(
     new ValidationPipe({

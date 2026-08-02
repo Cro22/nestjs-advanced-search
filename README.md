@@ -226,11 +226,23 @@ Configuration comes from environment variables, validated at startup with Joi. T
 | `REDIS_TTL_SECONDS`            | `60`                             | Default cache time to live                   |
 | `SEARCH_MAX_PAGE_SIZE`         | `100`                            | Upper bound for the page size                |
 | `AUTOCOMPLETE_MAX_SUGGESTIONS` | `10`                             | Upper bound for autocomplete results         |
+| `API_KEYS`                     | `` (empty)                       | Comma separated `key:role` pairs granting write access, e.g. `k1:admin,k2:ingest`. Empty means no writes are allowed |
+| `CORS_ORIGINS`                 | `` (empty)                       | Comma separated allowed origins. Empty grants no cross-origin access in production (permissive in development) |
+| `SWAGGER_ENABLED`              | `true`                           | Serve Swagger at `/api/docs`. Set to `false` in production |
 | `SEED_PRODUCT_COUNT`           | `500`                            | Number of products created by the seed       |
 
 ## API reference
 
 Base URL: `http://localhost:3000/api`. Interactive documentation lives at `/api/docs`.
+
+### Authentication
+
+Reads (`search`, `autocomplete`, `health`) are public. Writes (`POST`, `PUT`,
+`DELETE /products`), the view endpoint and `GET /metrics` require an API key
+passed as `Authorization: Bearer <key>` (or `X-API-Key: <key>`). Keys and their
+roles are configured with `API_KEYS` (see [Configuration](#configuration)):
+`admin` may mutate products and scrape metrics; `ingest` may only record views.
+A missing or unknown key is `401`; a valid key without the required role is `403`.
 
 ### GET /products/search
 
@@ -324,11 +336,12 @@ curl "http://localhost:3000/api/products/autocomplete?q=lap&limit=5"
 
 ### POST /products
 
-Creates a product in Postgres and projects it into Elasticsearch in the same use case, so it is immediately searchable. The write also bumps the cache generation, which instantly invalidates every cached search page. Coordinates are optional and must come as a pair.
+Creates a product in Postgres and projects it into Elasticsearch in the same use case, so it is immediately searchable. The write also bumps the cache generation, which instantly invalidates every cached search page. Coordinates are optional and must come as a pair. Requires an `admin` API key. Popularity is server-owned and always starts at `0`; it is not accepted from the client.
 
 ```bash
 curl -X POST "http://localhost:3000/api/products" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <admin-key>" \
   -d '{
     "name": "Aurora Laptop Pro",
     "description": "A lightweight laptop for everyday use",
@@ -337,25 +350,25 @@ curl -X POST "http://localhost:3000/api/products" \
     "location": "Madrid",
     "latitude": 40.4168,
     "longitude": -3.7038,
-    "price": 1299.99,
-    "popularity": 120
+    "price": 1299.99
   }'
 ```
 
 ### PUT /products/:id
 
-Full replacement of a product. The identity and creation date are kept, and so is the accumulated popularity unless the body provides one. The change is searchable on the next request. Returns `404` for an unknown id.
+Full replacement of a product. The identity, creation date and accumulated popularity are all kept; popularity only ever moves through the view endpoint. The change is searchable on the next request. Requires an `admin` API key. Returns `404` for an unknown id.
 
 ### DELETE /products/:id
 
-Removes the product from Postgres and from the search index. Returns `204` on success and `404` for an unknown id.
+Removes the product from Postgres and from the search index. Requires an `admin` API key. Returns `204` on success and `404` for an unknown id.
 
 ### POST /products/:id/view
 
-Records a view: atomically increments the popularity in Postgres and reprojects the document, so relevance boosting and popularity sorting reflect real interactions. Returns the new popularity.
+Records a view: atomically increments the popularity in Postgres and reprojects the document, so relevance boosting and popularity sorting reflect real interactions. Requires an `admin` or `ingest` API key. Returns the new popularity.
 
 ```bash
-curl -X POST "http://localhost:3000/api/products/<id>/view"
+curl -X POST "http://localhost:3000/api/products/<id>/view" \
+  -H "Authorization: Bearer <ingest-key>"
 ```
 
 ```json

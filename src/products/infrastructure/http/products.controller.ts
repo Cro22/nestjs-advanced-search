@@ -15,8 +15,9 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { Roles } from '@/auth/roles.decorator';
 import { AUTOCOMPLETE_THROTTLE } from '@/shared/infrastructure/http/throttle.constants';
 import { SearchProductsUseCase } from '@/products/application/use-cases/search-products.use-case';
 import { AutocompleteUseCase } from '@/products/application/use-cases/autocomplete.use-case';
@@ -92,6 +93,8 @@ export class ProductsController {
   }
 
   @Post()
+  @Roles('admin')
+  @ApiBearerAuth('api-key')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary: 'Create a product',
@@ -121,6 +124,8 @@ export class ProductsController {
   }
 
   @Put(':id')
+  @Roles('admin')
+  @ApiBearerAuth('api-key')
   @ApiOperation({
     summary: 'Update a product',
     description:
@@ -151,6 +156,8 @@ export class ProductsController {
   }
 
   @Delete(':id')
+  @Roles('admin')
+  @ApiBearerAuth('api-key')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a product',
@@ -165,6 +172,8 @@ export class ProductsController {
   }
 
   @Post(':id/view')
+  @Roles('admin', 'ingest')
+  @ApiBearerAuth('api-key')
   @ApiOperation({
     summary: 'Record a product view',
     description:
