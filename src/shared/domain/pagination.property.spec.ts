@@ -12,7 +12,9 @@ describe('pagination (property based)', () => {
     const sortValue = fc.oneof(
       fc.string(),
       fc.integer(),
-      fc.double({ noNaN: true, noDefaultInfinity: true }),
+      // Normalize -0 to 0: JSON has no signed zero, so -0 is not a distinct
+      // round-trippable value, and it never occurs as an ES sort value anyway.
+      fc.double({ noNaN: true, noDefaultInfinity: true }).map((x) => (Object.is(x, -0) ? 0 : x)),
       fc.boolean(),
     );
     fc.assert(

@@ -131,3 +131,7 @@ dist
 .pnp.*
 
 .idea
+
+# Mutation testing (Stryker)
+.stryker-tmp/
+reports/

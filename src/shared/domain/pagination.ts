@@ -19,7 +19,9 @@ export function clampPageSize(requested: number | undefined, max: number): numbe
 }
 
 export function normalizePage(requested: number | undefined): number {
-  if (!requested || requested < 1) {
+  // Reject non-finite (Infinity/NaN) too, so the result is always a usable page
+  // number rather than Infinity leaking into an offset calculation.
+  if (!requested || requested < 1 || !Number.isFinite(requested)) {
     return DEFAULT_PAGE;
   }
   return Math.floor(requested);
