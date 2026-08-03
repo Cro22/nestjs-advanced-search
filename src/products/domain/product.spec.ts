@@ -19,7 +19,7 @@ describe('Product.create', () => {
   it('builds a product from valid props', () => {
     const product = Product.create(props());
     expect(product.name).toBe('Laptop');
-    expect(product.price).toBe(999.99);
+    expect(product.price.toDecimal()).toBe(999.99);
   });
 
   it('rejects a blank name', () => {

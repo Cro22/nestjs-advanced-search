@@ -34,7 +34,7 @@ export class ProductMapper {
       location: product.location,
       latitude: product.coordinates?.lat ?? null,
       longitude: product.coordinates?.lon ?? null,
-      price: product.price,
+      price: product.price.toDecimal(),
       popularity: product.popularity,
       createdAt: product.createdAt,
     };

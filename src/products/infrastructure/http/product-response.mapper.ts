@@ -82,5 +82,6 @@ export function toSearchResponse(result: ProductSearchResult): SearchResponse {
 }
 
 export function toProductResponseFromDomain(product: Product): ProductResponse {
-  return toProductResponse(product);
+  // toPrimitives yields a plain decimal price (the Money VO is domain-only).
+  return toProductResponse(product.toPrimitives());
 }

@@ -4,6 +4,7 @@ import {
   InvalidProductNameError,
   NegativeProductPriceError,
 } from '@/products/domain/product.errors';
+import { Money } from '@/shared/domain/money';
 
 export interface ProductProps {
   id: string;
@@ -31,7 +32,8 @@ export class Product {
   readonly subcategories: string[];
   readonly location: string;
   readonly coordinates?: GeoPoint;
-  readonly price: number;
+  /** Encapsulated as a Money value object; the props carry a plain decimal. */
+  readonly price: Money;
   readonly popularity: number;
   readonly createdAt: Date;
 
@@ -45,7 +47,7 @@ export class Product {
     this.subcategories = [...props.subcategories];
     this.location = props.location;
     this.coordinates = props.coordinates ? { ...props.coordinates } : undefined;
-    this.price = props.price;
+    this.price = Money.fromDecimal(props.price);
     this.popularity = props.popularity;
     this.createdAt = new Date(props.createdAt);
   }
@@ -78,7 +80,7 @@ export class Product {
       subcategories: [...this.subcategories],
       location: this.location,
       coordinates: this.coordinates ? { ...this.coordinates } : undefined,
-      price: this.price,
+      price: this.price.toDecimal(),
       popularity: this.popularity,
       createdAt: new Date(this.createdAt),
     };
