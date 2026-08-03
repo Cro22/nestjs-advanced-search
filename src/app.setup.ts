@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import helmet from 'helmet';
 import compression from 'compression';
 import { AllExceptionsFilter } from '@/shared/infrastructure/http/all-exceptions.filter';
+import { DomainExceptionFilter } from '@/products/infrastructure/http/domain-exception.filter';
 
 /**
  * Everything an app instance needs besides listening: prefix, security
@@ -36,7 +37,11 @@ export function configureApp(app: INestApplication, config: ConfigService): void
     }),
   );
 
-  app.useGlobalFilters(new AllExceptionsFilter());
+  // Nest applies global filters in reverse registration order, so the catch-all
+  // is registered first and the domain filter last: the domain filter runs first
+  // for the errors it targets, and everything else falls through to the catch-all.
+  // Both render the same envelope.
+  app.useGlobalFilters(new AllExceptionsFilter(), new DomainExceptionFilter());
 
   // Without this, OnModuleDestroy hooks (Prisma disconnect, Redis quit) never
   // run on SIGTERM, which is exactly how a container is stopped.
