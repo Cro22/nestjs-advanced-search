@@ -11,13 +11,17 @@ export const MAX_SEARCH_WINDOW = 10000;
 /** Clamp a requested page size into a safe range to protect the engine. */
 export function clampPageSize(requested: number | undefined, max: number): number {
   if (!requested || requested < 1) {
-    return DEFAULT_PAGE_SIZE;
+    // The default itself is capped by max, so the result never exceeds the
+    // configured ceiling even when max is smaller than the default.
+    return Math.min(DEFAULT_PAGE_SIZE, max);
   }
   return Math.min(requested, max);
 }
 
 export function normalizePage(requested: number | undefined): number {
-  if (!requested || requested < 1) {
+  // Reject non-finite (Infinity/NaN) too, so the result is always a usable page
+  // number rather than Infinity leaking into an offset calculation.
+  if (!requested || requested < 1 || !Number.isFinite(requested)) {
     return DEFAULT_PAGE;
   }
   return Math.floor(requested);

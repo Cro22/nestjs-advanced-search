@@ -6,16 +6,26 @@ import {
   Get,
   HttpCode,
   HttpStatus,
-  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
   Put,
   Query,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Roles } from '@/auth/roles.decorator';
 import { AUTOCOMPLETE_THROTTLE } from '@/shared/infrastructure/http/throttle.constants';
@@ -25,19 +35,23 @@ import { CreateProductUseCase } from '@/products/application/use-cases/create-pr
 import { UpdateProductUseCase } from '@/products/application/use-cases/update-product.use-case';
 import { DeleteProductUseCase } from '@/products/application/use-cases/delete-product.use-case';
 import { RecordProductViewUseCase } from '@/products/application/use-cases/record-product-view.use-case';
-import { InvalidProductError, ProductNotFoundError } from '@/products/domain/product.errors';
-import {
-  InvalidSearchQueryError,
-  SearchUnavailableError,
-} from '@/products/domain/search/search.errors';
 import { SearchProductsQueryDto } from '@/products/infrastructure/http/dto/search-products.query.dto';
 import { AutocompleteQueryDto } from '@/products/infrastructure/http/dto/autocomplete.query.dto';
 import { CreateProductDto } from '@/products/infrastructure/http/dto/create-product.dto';
+import { UpdateProductDto } from '@/products/infrastructure/http/dto/update-product.dto';
 import { toSearchCriteria } from '@/products/infrastructure/http/search-criteria.mapper';
 import {
   toProductResponseFromDomain,
   toSearchResponse,
 } from '@/products/infrastructure/http/product-response.mapper';
+import {
+  AutocompleteResponseDto,
+  ErrorResponseDto,
+  ProductResponseDto,
+  SearchResponseDto,
+  ViewResponseDto,
+} from '@/products/infrastructure/http/dto/product-response.dto';
+import { GeoPoint } from '@/products/domain/geo';
 
 @ApiTags('products')
 @Controller('products')
@@ -64,14 +78,23 @@ export class ProductsController {
     description:
       'Full text search with relevance ranking, combined faceting, filters, pagination, sorting and query suggestions.',
   })
+  @ApiOkResponse({
+    type: SearchResponseDto,
+    description: 'Ranked hits with facets, meta and suggestions.',
+  })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Malformed query (inconsistent geo params, cursor combined with page, window exceeded).',
+  })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description: 'The search backend is unavailable.',
+  })
   async search(@Query() query: SearchProductsQueryDto) {
-    try {
-      const criteria = toSearchCriteria(query, this.maxPageSize);
-      const result = await this.searchProducts.execute(criteria);
-      return toSearchResponse(result);
-    } catch (error) {
-      this.rethrow(error);
-    }
+    const criteria = toSearchCriteria(query, this.maxPageSize);
+    const result = await this.searchProducts.execute(criteria);
+    return toSearchResponse(result);
   }
 
   @Get('autocomplete')
@@ -82,14 +105,15 @@ export class ProductsController {
     description:
       'Prefix based product name suggestions served from Elasticsearch and cached in Redis.',
   })
+  @ApiOkResponse({ type: AutocompleteResponseDto })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description: 'The search backend is unavailable.',
+  })
   async autocompleteSuggestions(@Query() query: AutocompleteQueryDto) {
     const limit = Math.min(query.limit ?? this.autocompleteMax, this.autocompleteMax);
-    try {
-      const suggestions = await this.autocomplete.execute({ prefix: query.q, limit });
-      return { suggestions };
-    } catch (error) {
-      this.rethrow(error);
-    }
+    const suggestions = await this.autocomplete.execute({ prefix: query.q, limit });
+    return { suggestions };
   }
 
   @Post()
@@ -100,27 +124,24 @@ export class ProductsController {
     summary: 'Create a product',
     description: 'Persists the product in Postgres and projects it into Elasticsearch.',
   })
+  @ApiCreatedResponse({ type: ProductResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Validation or invariant failure.',
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'API key lacks the admin role.' })
   async create(@Body() dto: CreateProductDto) {
-    if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
-      throw new BadRequestException('latitude and longitude must be provided together');
-    }
-    try {
-      const product = await this.createProduct.execute({
-        name: dto.name,
-        description: dto.description,
-        category: dto.category,
-        subcategories: dto.subcategories,
-        location: dto.location,
-        coordinates:
-          dto.latitude !== undefined && dto.longitude !== undefined
-            ? { lat: dto.latitude, lon: dto.longitude }
-            : undefined,
-        price: dto.price,
-      });
-      return toProductResponseFromDomain(product);
-    } catch (error) {
-      this.rethrow(error);
-    }
+    const product = await this.createProduct.execute({
+      name: dto.name,
+      description: dto.description,
+      category: dto.category,
+      subcategories: dto.subcategories,
+      location: dto.location,
+      coordinates: this.toCoordinates(dto),
+      price: dto.price,
+    });
+    return toProductResponseFromDomain(product);
   }
 
   @Put(':id')
@@ -129,30 +150,28 @@ export class ProductsController {
   @ApiOperation({
     summary: 'Update a product',
     description:
-      'Full replacement. Keeps the identity, creation date and, unless provided, the accumulated popularity. The change is searchable on the next request.',
+      'Full replacement. Keeps the identity and creation date; the accumulated popularity is preserved and can only change through the view endpoint. The change is searchable on the next request.',
   })
-  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateProductDto) {
-    if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
-      throw new BadRequestException('latitude and longitude must be provided together');
-    }
-    try {
-      const product = await this.updateProduct.execute({
-        id,
-        name: dto.name,
-        description: dto.description,
-        category: dto.category,
-        subcategories: dto.subcategories,
-        location: dto.location,
-        coordinates:
-          dto.latitude !== undefined && dto.longitude !== undefined
-            ? { lat: dto.latitude, lon: dto.longitude }
-            : undefined,
-        price: dto.price,
-      });
-      return toProductResponseFromDomain(product);
-    } catch (error) {
-      this.rethrow(error);
-    }
+  @ApiOkResponse({ type: ProductResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Validation or invariant failure.',
+  })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No product with that id.' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'API key lacks the admin role.' })
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto) {
+    const product = await this.updateProduct.execute({
+      id,
+      name: dto.name,
+      description: dto.description,
+      category: dto.category,
+      subcategories: dto.subcategories,
+      location: dto.location,
+      coordinates: this.toCoordinates(dto),
+      price: dto.price,
+    });
+    return toProductResponseFromDomain(product);
   }
 
   @Delete(':id')
@@ -163,12 +182,12 @@ export class ProductsController {
     summary: 'Delete a product',
     description: 'Removes the product from Postgres and from the search index.',
   })
+  @ApiNoContentResponse({ description: 'The product was deleted.' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No product with that id.' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'API key lacks the admin role.' })
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    try {
-      await this.deleteProduct.execute(id);
-    } catch (error) {
-      this.rethrow(error);
-    }
+    await this.deleteProduct.execute(id);
   }
 
   @Post(':id/view')
@@ -179,31 +198,28 @@ export class ProductsController {
     description:
       'Increments the popularity signal that feeds relevance boosting and popularity sorting.',
   })
+  @ApiOkResponse({ type: ViewResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No product with that id.' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'API key lacks the admin or ingest role.',
+  })
   async view(@Param('id', ParseUUIDPipe) id: string) {
-    try {
-      const product = await this.recordView.execute(id);
-      return { id: product.id, popularity: product.popularity };
-    } catch (error) {
-      this.rethrow(error);
-    }
+    const product = await this.recordView.execute(id);
+    return { id: product.id, popularity: product.popularity };
   }
 
   /**
-   * Translate domain errors into their HTTP counterparts. A malformed request
-   * is the caller's mistake (400), a missing product is a 404, and a search
-   * backend outage becomes a clean 503 instead of leaking the raw
-   * Elasticsearch error.
+   * latitude and longitude travel as separate fields, so their consistency can
+   * only be enforced here: both or neither.
    */
-  private rethrow(error: unknown): never {
-    if (error instanceof InvalidSearchQueryError || error instanceof InvalidProductError) {
-      throw new BadRequestException(error.message);
+  private toCoordinates(dto: CreateProductDto): GeoPoint | undefined {
+    if ((dto.latitude === undefined) !== (dto.longitude === undefined)) {
+      throw new BadRequestException('latitude and longitude must be provided together');
     }
-    if (error instanceof ProductNotFoundError) {
-      throw new NotFoundException(error.message);
-    }
-    if (error instanceof SearchUnavailableError) {
-      throw new ServiceUnavailableException(error.message);
-    }
-    throw error;
+    return dto.latitude !== undefined && dto.longitude !== undefined
+      ? { lat: dto.latitude, lon: dto.longitude }
+      : undefined;
   }
 }

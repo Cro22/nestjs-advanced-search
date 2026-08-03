@@ -11,6 +11,21 @@ import {
   SearchUnavailableError,
 } from '@/products/domain/search/search.errors';
 import { SEARCH_SCHEMA_VERSION } from '@/products/domain/search/search-version';
+import { Product } from '@/products/domain/product';
+
+function sampleProduct(): Product {
+  return Product.create({
+    id: '1',
+    name: 'Aurora Laptop',
+    description: 'x',
+    category: 'Electronics',
+    subcategories: [],
+    location: 'Madrid',
+    price: 1,
+    popularity: 0,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+  });
+}
 
 function criteria(overrides: Partial<ProductSearchCriteria> = {}): ProductSearchCriteria {
   return {
@@ -110,19 +125,7 @@ describe('EsProductSearchAdapter', () => {
       const staging = client.indices.create.mock.calls[0][0].index as string;
       expect(staging).toMatch(new RegExp(`^products_v${SEARCH_SCHEMA_VERSION}_\\d+$`));
 
-      await adapter.bulkIndex([
-        {
-          id: '1',
-          name: 'Aurora Laptop',
-          description: 'x',
-          category: 'Electronics',
-          subcategories: [],
-          location: 'Madrid',
-          price: 1,
-          popularity: 0,
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        } as never,
-      ]);
+      await adapter.bulkIndex([sampleProduct()]);
       const operations = client.bulk.mock.calls[0][0].operations as Array<
         Record<string, { _index: string }>
       >;
@@ -137,19 +140,7 @@ describe('EsProductSearchAdapter', () => {
     it('bulk indexes into the alias when no rebuild is staging', async () => {
       const { client, adapter } = buildRebuildAdapter();
 
-      await adapter.bulkIndex([
-        {
-          id: '1',
-          name: 'Aurora Laptop',
-          description: 'x',
-          category: 'Electronics',
-          subcategories: [],
-          location: 'Madrid',
-          price: 1,
-          popularity: 0,
-          createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        } as never,
-      ]);
+      await adapter.bulkIndex([sampleProduct()]);
 
       const operations = client.bulk.mock.calls[0][0].operations as Array<
         Record<string, { _index: string }>

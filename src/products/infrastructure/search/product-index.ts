@@ -27,7 +27,7 @@ export function toDocument(product: Product): ProductDocument {
     location: product.location,
     // A geo_point field must be absent when unknown; null is rejected by ES.
     ...(product.coordinates ? { coordinates: product.coordinates } : {}),
-    price: product.price,
+    price: product.price.toDecimal(),
     popularity: product.popularity,
     createdAt: product.createdAt.toISOString(),
   };

@@ -19,7 +19,7 @@ describe('Product.create', () => {
   it('builds a product from valid props', () => {
     const product = Product.create(props());
     expect(product.name).toBe('Laptop');
-    expect(product.price).toBe(999.99);
+    expect(product.price.toDecimal()).toBe(999.99);
   });
 
   it('rejects a blank name', () => {
@@ -44,6 +44,30 @@ describe('Product.create', () => {
   it('round trips through primitives', () => {
     const original = props();
     expect(Product.create(original).toPrimitives()).toEqual(original);
+  });
+
+  it('is not affected by mutating the source props after construction', () => {
+    const source = props({ subcategories: ['Laptops'], coordinates: { lat: 40, lon: -3 } });
+    const createdAtMs = source.createdAt.getTime();
+    const product = Product.create(source);
+
+    source.subcategories.push('Tampered');
+    source.coordinates!.lat = 0;
+    source.createdAt.setFullYear(1999);
+
+    expect(product.subcategories).toEqual(['Laptops']);
+    expect(product.coordinates).toEqual({ lat: 40, lon: -3 });
+    expect(product.createdAt.getTime()).toBe(createdAtMs);
+  });
+
+  it('does not expose internal state through toPrimitives', () => {
+    const product = Product.create(props({ subcategories: ['Laptops'] }));
+    const snapshot = product.toPrimitives();
+
+    snapshot.subcategories.push('Tampered');
+    snapshot.coordinates && (snapshot.coordinates.lat = 0);
+
+    expect(product.subcategories).toEqual(['Laptops']);
   });
 
   it('accepts valid coordinates', () => {

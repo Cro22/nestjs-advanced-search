@@ -422,6 +422,14 @@ npm run test:e2e
 
 They need a running Docker daemon (Docker Desktop on Windows and macOS). The first run downloads the service images, so allow a few extra minutes.
 
+**Property based tests** (fast-check) complement the example based ones where edge cases hide: cursor encode/decode round-trips, the page-size and page-number clamps, Money conversions and ordering, and the search criteria mapper's geo/price rules. They generate hundreds of inputs per run and shrink any failure to a minimal counterexample — which is how the `normalizePage`/`clampPageSize` boundary hardening was found. They run as part of `npm test`.
+
+**Mutation testing** (Stryker) checks whether the tests actually catch bugs rather than just execute lines. It is scoped to the pure domain logic and run on demand:
+
+```bash
+npm run test:mutation    # writes an HTML report to reports/mutation/
+```
+
 ## Operations
 
 **Metrics.** Prometheus metrics are exposed at `GET /api/metrics` (admin key required): HTTP request latency by route, cache hit/miss counters, Elasticsearch error counts, and the outbox gauges (`outbox_pending_entries`, `outbox_dead_lettered_entries`). Default process and Node runtime metrics are included.

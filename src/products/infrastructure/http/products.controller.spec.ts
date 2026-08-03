@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  NotFoundException,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ProductsController } from '@/products/infrastructure/http/products.controller';
 import { Product } from '@/products/domain/product';
@@ -87,17 +83,19 @@ describe('ProductsController', () => {
       expect(res.meta.total).toBe(0);
     });
 
-    it('translates an invalid query into 400', async () => {
+    // Domain errors now propagate to the global DomainExceptionFilter instead of
+    // being translated in the controller.
+    it('propagates an invalid query error', async () => {
       searchProducts.execute.mockRejectedValue(new InvalidSearchQueryError('bad'));
       await expect(controller.search({} as SearchProductsQueryDto)).rejects.toBeInstanceOf(
-        BadRequestException,
+        InvalidSearchQueryError,
       );
     });
 
-    it('translates a backend outage into 503', async () => {
+    it('propagates a backend outage error', async () => {
       searchProducts.execute.mockRejectedValue(new SearchUnavailableError());
       await expect(controller.search({} as SearchProductsQueryDto)).rejects.toBeInstanceOf(
-        ServiceUnavailableException,
+        SearchUnavailableError,
       );
     });
   });
@@ -126,16 +124,16 @@ describe('ProductsController', () => {
       expect(createProduct.execute).not.toHaveBeenCalled();
     });
 
-    it('maps a domain invariant error to 400', async () => {
+    it('propagates a domain invariant error', async () => {
       createProduct.execute.mockRejectedValue(new InvalidProductNameError());
-      await expect(controller.create(validBody)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(controller.create(validBody)).rejects.toBeInstanceOf(InvalidProductNameError);
     });
   });
 
   describe('update', () => {
-    it('maps a missing product to 404', async () => {
+    it('propagates a missing product error', async () => {
       updateProduct.execute.mockRejectedValue(new ProductNotFoundError('x'));
-      await expect(controller.update('x', validBody)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(controller.update('x', validBody)).rejects.toBeInstanceOf(ProductNotFoundError);
     });
 
     it('rejects a half specified coordinate pair with 400', async () => {
@@ -152,9 +150,9 @@ describe('ProductsController', () => {
       expect(deleteProduct.execute).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111');
     });
 
-    it('maps a missing product to 404', async () => {
+    it('propagates a missing product error', async () => {
       deleteProduct.execute.mockRejectedValue(new ProductNotFoundError('x'));
-      await expect(controller.remove('x')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(controller.remove('x')).rejects.toBeInstanceOf(ProductNotFoundError);
     });
   });
 
@@ -165,9 +163,9 @@ describe('ProductsController', () => {
       expect(res).toEqual({ id: '11111111-1111-4111-8111-111111111111', popularity: 3 });
     });
 
-    it('maps a missing product to 404', async () => {
+    it('propagates a missing product error', async () => {
       recordView.execute.mockRejectedValue(new ProductNotFoundError('x'));
-      await expect(controller.view('x')).rejects.toBeInstanceOf(NotFoundException);
+      await expect(controller.view('x')).rejects.toBeInstanceOf(ProductNotFoundError);
     });
   });
 });

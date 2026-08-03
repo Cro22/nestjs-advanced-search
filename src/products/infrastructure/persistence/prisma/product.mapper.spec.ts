@@ -24,11 +24,12 @@ describe('ProductMapper', () => {
   it('maps a row with coordinates into the domain and back', () => {
     const product = ProductMapper.toDomain(row());
     expect(product.coordinates).toEqual({ lat: 40.4168, lon: -3.7038 });
-    expect(product.price).toBe(999.99);
+    expect(product.price.toDecimal()).toBe(999.99);
 
     const persisted = ProductMapper.toPersistence(product);
     expect(persisted.latitude).toBe(40.4168);
     expect(persisted.longitude).toBe(-3.7038);
+    expect(persisted.price).toBe(999.99);
   });
 
   it('maps a row without coordinates as undefined and persists nulls', () => {
