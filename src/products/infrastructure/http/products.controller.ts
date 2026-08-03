@@ -13,7 +13,19 @@ import {
   Query,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiBearerAuth,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiServiceUnavailableResponse,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Roles } from '@/auth/roles.decorator';
 import { AUTOCOMPLETE_THROTTLE } from '@/shared/infrastructure/http/throttle.constants';
@@ -32,6 +44,13 @@ import {
   toProductResponseFromDomain,
   toSearchResponse,
 } from '@/products/infrastructure/http/product-response.mapper';
+import {
+  AutocompleteResponseDto,
+  ErrorResponseDto,
+  ProductResponseDto,
+  SearchResponseDto,
+  ViewResponseDto,
+} from '@/products/infrastructure/http/dto/product-response.dto';
 import { GeoPoint } from '@/products/domain/geo';
 
 @ApiTags('products')
@@ -59,6 +78,19 @@ export class ProductsController {
     description:
       'Full text search with relevance ranking, combined faceting, filters, pagination, sorting and query suggestions.',
   })
+  @ApiOkResponse({
+    type: SearchResponseDto,
+    description: 'Ranked hits with facets, meta and suggestions.',
+  })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description:
+      'Malformed query (inconsistent geo params, cursor combined with page, window exceeded).',
+  })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description: 'The search backend is unavailable.',
+  })
   async search(@Query() query: SearchProductsQueryDto) {
     const criteria = toSearchCriteria(query, this.maxPageSize);
     const result = await this.searchProducts.execute(criteria);
@@ -72,6 +104,11 @@ export class ProductsController {
     summary: 'Autocomplete suggestions',
     description:
       'Prefix based product name suggestions served from Elasticsearch and cached in Redis.',
+  })
+  @ApiOkResponse({ type: AutocompleteResponseDto })
+  @ApiServiceUnavailableResponse({
+    type: ErrorResponseDto,
+    description: 'The search backend is unavailable.',
   })
   async autocompleteSuggestions(@Query() query: AutocompleteQueryDto) {
     const limit = Math.min(query.limit ?? this.autocompleteMax, this.autocompleteMax);
@@ -87,6 +124,13 @@ export class ProductsController {
     summary: 'Create a product',
     description: 'Persists the product in Postgres and projects it into Elasticsearch.',
   })
+  @ApiCreatedResponse({ type: ProductResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Validation or invariant failure.',
+  })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'API key lacks the admin role.' })
   async create(@Body() dto: CreateProductDto) {
     const product = await this.createProduct.execute({
       name: dto.name,
@@ -108,6 +152,14 @@ export class ProductsController {
     description:
       'Full replacement. Keeps the identity and creation date; the accumulated popularity is preserved and can only change through the view endpoint. The change is searchable on the next request.',
   })
+  @ApiOkResponse({ type: ProductResponseDto })
+  @ApiBadRequestResponse({
+    type: ErrorResponseDto,
+    description: 'Validation or invariant failure.',
+  })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No product with that id.' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'API key lacks the admin role.' })
   async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateProductDto) {
     const product = await this.updateProduct.execute({
       id,
@@ -130,6 +182,10 @@ export class ProductsController {
     summary: 'Delete a product',
     description: 'Removes the product from Postgres and from the search index.',
   })
+  @ApiNoContentResponse({ description: 'The product was deleted.' })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No product with that id.' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({ type: ErrorResponseDto, description: 'API key lacks the admin role.' })
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.deleteProduct.execute(id);
   }
@@ -141,6 +197,13 @@ export class ProductsController {
     summary: 'Record a product view',
     description:
       'Increments the popularity signal that feeds relevance boosting and popularity sorting.',
+  })
+  @ApiOkResponse({ type: ViewResponseDto })
+  @ApiNotFoundResponse({ type: ErrorResponseDto, description: 'No product with that id.' })
+  @ApiUnauthorizedResponse({ type: ErrorResponseDto, description: 'Missing or invalid API key.' })
+  @ApiForbiddenResponse({
+    type: ErrorResponseDto,
+    description: 'API key lacks the admin or ingest role.',
   })
   async view(@Param('id', ParseUUIDPipe) id: string) {
     const product = await this.recordView.execute(id);
